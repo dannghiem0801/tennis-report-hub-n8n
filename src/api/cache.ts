@@ -1,7 +1,7 @@
 /**
  * TTL cache backed by localStorage.
  *
- * Used to reduce RapidAPI call volume (100 req/min cap):
+ * Used to reduce RapidAPI call volume (90 req/min cap, 1,000 req/day hard):
  * - Tournament info rarely changes within a day → cache 24h
  * - Fixtures change as matches go live → cache 2 min
  * - Test-connection results are valid for 30s

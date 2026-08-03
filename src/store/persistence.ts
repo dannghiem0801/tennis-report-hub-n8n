@@ -79,10 +79,12 @@ export const storage = {
     // they're user preferences, not secrets, so they stay in localStorage.
     const baseDefaults: Settings = {
       rapidApiKey: "",
-      // Default = 0 (No Poll). Rationale: most users hit RapidAPI quota
-      // (500 req/month) faster than expected with auto-polling. With
-      // cache 30 min, manual refresh is enough for ~3-4 sessions/week of
-      // usage. Users who want auto-poll can pick 5/10/15/30 in Settings.
+      // Default = 0 (No Poll). Rationale: even with the current 1,000 req/day
+      // cap, auto-polling is rarely needed — the 30-min cache already keeps
+      // the dashboard fresh on every tab switch, and a heavy user burns
+      // <100 req/day for normal report generation. Lean default keeps the
+      // network quiet for users who only open the app a few times a day.
+      // Users who want auto-poll can pick 5/10/15/30 in Settings.
       pollingIntervalMinutes: 0,
       defaultTemplateId: "tpl-default",
       timezone: "Asia/Ho_Chi_Minh",

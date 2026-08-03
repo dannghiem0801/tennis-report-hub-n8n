@@ -87,12 +87,12 @@ export function TournamentBrowser({ onOpenReport, onOpenScheduleModal }: Tournam
           <p className="mt-2 text-[11px] text-slate-500">
             Chưa có key? Đăng ký tại{" "}
             <a
-              href="https://rapidapi.com/search/livescore6%20tennis"
+              href="https://rapidapi.com/search/flashscore4%20tennis"
               target="_blank"
               rel="noreferrer"
               className="text-blue-400 hover:text-blue-300"
             >
-              livescore6 tennis trên RapidAPI
+              flashscore4 tennis trên RapidAPI
             </a>
             .
           </p>
@@ -196,6 +196,16 @@ export function TournamentBrowser({ onOpenReport, onOpenScheduleModal }: Tournam
 
   return (
     <div className="flex flex-col gap-3">
+      <DaySummary
+        totalMatches={matches.length}
+        liveCount={matches.filter((m) => m.status === "live").length}
+        completedCount={matches.filter((m) => m.status === "completed").length}
+        scheduledCount={matches.filter((m) => m.status === "scheduled").length}
+        tournamentCount={tournaments.length}
+        lastFetchedAt={lastFetchedAt}
+        isUsingLiveData={isUsingLiveData}
+        onRefresh={refreshMatches}
+      />
       {groups.map(({ tournament, matches: ms }) => (
         <TournamentCard
           key={tournament.id}
@@ -205,6 +215,76 @@ export function TournamentBrowser({ onOpenReport, onOpenScheduleModal }: Tournam
           onOpenScheduleModal={onOpenScheduleModal}
         />
       ))}
+    </div>
+  );
+}
+
+function DaySummary({
+  totalMatches,
+  liveCount,
+  completedCount,
+  scheduledCount,
+  tournamentCount,
+  lastFetchedAt,
+  isUsingLiveData,
+  onRefresh,
+}: {
+  totalMatches: number;
+  liveCount: number;
+  completedCount: number;
+  scheduledCount: number;
+  tournamentCount: number;
+  lastFetchedAt: Date | null;
+  isUsingLiveData: boolean;
+  onRefresh: () => void;
+}) {
+  return (
+    <div className="flex flex-wrap items-center gap-3 rounded-lg border border-slate-800 bg-slate-900/40 px-4 py-2.5 text-xs">
+      <div className="flex items-center gap-1.5 text-slate-300">
+        <span className="text-base font-semibold tabular-nums">{totalMatches}</span>
+        <span className="text-slate-400">trận</span>
+      </div>
+      <span className="text-slate-700">·</span>
+      <div className="flex items-center gap-1.5 text-slate-300">
+        <span className="text-base font-semibold tabular-nums">{tournamentCount}</span>
+        <span className="text-slate-400">giải</span>
+      </div>
+      {liveCount > 0 && (
+        <>
+          <span className="text-slate-700">·</span>
+          <span className="inline-flex items-center gap-1 font-medium text-red-300">
+            <span className="inline-block h-1.5 w-1.5 animate-pulse rounded-full bg-red-400" />
+            {liveCount} live
+          </span>
+        </>
+      )}
+      {completedCount > 0 && (
+        <>
+          <span className="text-slate-700">·</span>
+          <span className="text-emerald-300">{completedCount} xong</span>
+        </>
+      )}
+      {scheduledCount > 0 && (
+        <>
+          <span className="text-slate-700">·</span>
+          <span className="text-slate-300">{scheduledCount} sắp</span>
+        </>
+      )}
+      <div className="ml-auto flex items-center gap-3 text-[11px] text-slate-500">
+        {lastFetchedAt && (
+          <span>
+            Cập nhật {formatTime(lastFetchedAt)}
+            {isUsingLiveData ? " · Live API" : " · cache"}
+          </span>
+        )}
+        <button
+          onClick={onRefresh}
+          className="rounded-md border border-slate-700 px-2 py-0.5 text-slate-300 transition-colors hover:border-slate-500 hover:text-slate-100"
+          title="Refresh"
+        >
+          ↻ Refresh
+        </button>
+      </div>
     </div>
   );
 }

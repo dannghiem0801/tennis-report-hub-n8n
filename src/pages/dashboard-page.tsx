@@ -187,7 +187,7 @@ function RateLimitBanner({ until, onRetry }: { until: Date; onRetry: () => void 
     <div className="flex items-start gap-2 rounded-md border border-red-500/40 bg-red-500/10 px-3 py-2 text-[12px] text-red-200">
       <Clock className="mt-0.5 h-3.5 w-3.5 flex-shrink-0 text-red-400" />
       <div className="flex-1">
-        <div className="font-medium text-red-100">Đang chờ rate limit (100 req/phút)</div>
+        <div className="font-medium text-red-100">Đang chờ rate limit (90 req/phút)</div>
         <div className="mt-0.5 text-red-200/90">
           Tennis API đã từ chối yêu cầu gần nhất. Auto-refresh và polling sẽ tạm dừng.{remaining > 0 && (
             <> Còn lại <span className="font-mono font-semibold">{mm}:{String(ss).padStart(2, "0")}</span> trước khi có thể thử lại.</>

@@ -4,7 +4,7 @@ Tennis dashboard cho phóng viên thể thao Việt Nam: xem lịch thi đấu t
 
 ## Language
 
-**Match**: Một trận đấu tennis (singles) lấy từ RapidAPI livescore6, đã được flatten từ Stage → Event. Là đơn vị dữ liệu cơ bản của app.
+**Match**: Một trận đấu tennis (singles) lấy từ RapidAPI flashscore4, đã được mapper chuẩn hóa về shape chung. Là đơn vị dữ liệu cơ bản của app.
 _Avoid_: game, fixture, event (event là thuật ngữ riêng của API response)
 
 **Watchlist**: Tập hợp các Match mà user đánh dấu theo dõi. Là nguồn dữ liệu để sinh báo cáo.

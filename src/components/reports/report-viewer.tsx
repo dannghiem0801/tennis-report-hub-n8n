@@ -14,6 +14,7 @@ import { useApp } from "@/store/app-store";
 import { formatDateVi, formatTime } from "@/lib/utils";
 import { TournamentBadge } from "@/components/ui/tournament-badge";
 import { formatFinalScore } from "@/lib/format-helpers";
+import { PointByPointViewer } from "@/components/reports/point-by-point-viewer";
 
 interface ReportViewerProps {
   matchId: string | null;
@@ -166,6 +167,12 @@ export function ReportViewer({ matchId, onClose }: ReportViewerProps) {
                 __html: markdownToHtml(report.content),
               }}
             />
+          )}
+
+          {/* Point-by-point tabbed viewer — only when we have PBP data
+              (match was added to the watchlist and PBP fetch succeeded). */}
+          {!isPrompt && match.pointByPoint && match.pointByPoint.sets.length > 0 && (
+            <PointByPointViewer match={match} />
           )}
         </div>
 

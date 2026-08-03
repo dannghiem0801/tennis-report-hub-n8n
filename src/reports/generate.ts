@@ -167,6 +167,7 @@ function fillTemplate(template: string, match: Match, winner: 1 | 2 | null): str
     "{score}": score,
     "{setScores}": score,
     "{setNarrative}": buildSetNarrative(match, winner),
+    "{pointByPoint}": formatPointByPointForLLM(match, winner),
     "{momentumNote}": buildMomentumNote(match, winner),
     "{contextNote}": buildContextNote(match, winner),
     "{turningPoint}": "giữa set thứ 3",
@@ -349,4 +350,84 @@ export async function generateReport({ match, templates, settings, watchlistId, 
     llmModel,
     triggeredBy: triggeredBy ?? "auto-on-completion",
   };
+}
+
+/**
+ * Format point-by-point data into a compact, LLM-friendly text block.
+ * Highlights breaks and deuce games (the dramatic moments a reporter
+ * would want to mention). Returns an empty string if no PBP data is
+ * available — the LLM prompt then falls back to web search for context.
+ */
+function formatPointByPointForLLM(
+  match: Match,
+  winner: 1 | 2 | null,
+): string {
+  const pbp = match.pointByPoint;
+  if (!pbp || pbp.sets.length === 0) return "";
+
+  const p1Name = match.player1.fullName;
+  const p2Name = match.player2.fullName;
+  const lines: string[] = [];
+
+  lines.push("### Diễn biến point-by-point (từ FlashScore API)");
+
+  let totalBreaks = { 1: 0, 2: 0 };
+  let totalDeuceGames = 0;
+  let longestGamePoints = 0;
+
+  for (const set of pbp.sets) {
+    const p1SetGames = set.games[set.games.length - 1]?.homeGames ?? 0;
+    const p2SetGames = set.games[set.games.length - 1]?.awayGames ?? 0;
+    lines.push("");
+    lines.push(
+      `**${set.name}**: ${p1Name} ${p1SetGames} - ${p2Name} ${p2SetGames} ` +
+        `(${p1SetGames > p2SetGames ? p1Name : p2Name} thắng set)`
+    );
+    lines.push("");
+
+    for (let i = 0; i < set.games.length; i++) {
+      const g = set.games[i];
+      const gameNum = i + 1;
+      const server = g.server === 1 ? p1Name : p2Name;
+      const winner = g.gameWinner === 1 ? p1Name : p2Name;
+      const isBreak = g.isBreak !== null;
+      const pointCount = g.pointSequence.split(",").filter((p) => p.trim()).length;
+      const hasDeuce = pointCount >= 6; // 4-4 (deuce) needs ≥6 points
+
+      if (isBreak) totalBreaks[g.isBreak as 1 | 2]++;
+      if (hasDeuce) totalDeuceGames++;
+      if (pointCount > longestGamePoints) longestGamePoints = pointCount;
+
+      // Highlight: breaks, deuce games, long games (≥10 points), and last game of set
+      const isLastGameOfSet = i === set.games.length - 1;
+      const isHighlighted = isBreak || hasDeuce || pointCount >= 10 || isLastGameOfSet;
+      if (!isHighlighted) continue;
+
+      const marker = isBreak ? " 🔴 BREAK" : hasDeuce ? " ⏱ Deuce" : pointCount >= 10 ? " ⏳ Long game" : " ✓ Set point";
+      lines.push(
+        `  Game ${gameNum}: ${server} serve → ${winner} thắng (${g.homeGames}-${g.awayGames})${marker}`
+      );
+      lines.push(`    Points: ${g.pointSequence}`);
+    }
+  }
+
+  lines.push("");
+  lines.push("**Tổng kết point-by-point:**");
+  lines.push(
+    `- Break points: ${p1Name} ${totalBreaks[1]} lần, ${p2Name} ${totalBreaks[2]} lần`
+  );
+  lines.push(`- Deuce games: ${totalDeuceGames}`);
+  lines.push(`- Game dài nhất: ${longestGamePoints} điểm`);
+
+  if (winner) {
+    const winnerBreaks = totalBreaks[winner as 1 | 2];
+    const loserBreaks = totalBreaks[winner === 1 ? 2 : 1];
+    lines.push(
+      winnerBreaks > loserBreaks
+        ? `- ${winner === 1 ? p1Name : p2Name} thắng nhờ break serve nhiều hơn (${winnerBreaks} vs ${loserBreaks})`
+        : ""
+    );
+  }
+
+  return lines.join("\n");
 }

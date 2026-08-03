@@ -226,7 +226,7 @@ export function SettingsPage() {
                   RapidAPI Key (Tennis API)
                 </CardTitle>
                 <CardDescription className="text-[11px]">
-                  Key dùng để gọi Tennis API lấy dữ liệu trận đấu thật (ATP + WTA).
+                  Key dùng để gọi FlashScore API lấy dữ liệu trận đấu tennis thật (ATP + WTA + Challenger + ITF) theo ngày.
                 </CardDescription>
               </CardHeader>
               <CardContent className="space-y-2">
@@ -305,7 +305,7 @@ export function SettingsPage() {
                   </span>
                 </div>
                 <a
-                  href="https://rapidapi.com/jjrm365-kIFr3Nx_odV/api/tennis-api-atp-wta-itf"
+                  href="https://rapidapi.com/search/flashscore4%20tennis"
                   target="_blank"
                   rel="noreferrer"
                   className="inline-flex items-center gap-1 text-[11px] text-blue-400 hover:text-blue-300"
@@ -325,7 +325,7 @@ export function SettingsPage() {
                     size="sm"
                     variant="ghost"
                     onClick={() => {
-                      if (window.confirm("Xóa cache API? Lần refresh tiếp theo sẽ gọi lại Tennis API.")) {
+                      if (window.confirm("Xóa cache API? Lần refresh tiếp theo sẽ gọi lại FlashScore API.")) {
                         clearApiCacheAndRefresh();
                       }
                     }}
@@ -813,8 +813,7 @@ export function SettingsPage() {
             </CardContent>
           </Card>
 
-          {/* Timezone */}
-
+          {/* Timezone — fixed, no user choice (single-market VN product) */}
           <Card>
             <CardHeader className="pb-2">
               <CardTitle className="flex items-center gap-2 text-sm">
@@ -822,27 +821,15 @@ export function SettingsPage() {
                 Múi giờ
               </CardTitle>
               <CardDescription className="text-[11px]">
-                Dùng để hiển thị giờ thi đấu theo khu vực của bạn.
+                Cố định cho toàn app (dùng cho cả hiển thị lẫn gọi API).
               </CardDescription>
             </CardHeader>
             <CardContent>
-              <Select
-                value={settings.timezone}
-                onValueChange={(v) => updateSettings({ timezone: v })}
-              >
-                <SelectTrigger>
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="Asia/Ho_Chi_Minh">Việt Nam (UTC+7)</SelectItem>
-                  <SelectItem value="Asia/Bangkok">Bangkok (UTC+7)</SelectItem>
-                  <SelectItem value="Asia/Tokyo">Tokyo (UTC+9)</SelectItem>
-                  <SelectItem value="Europe/London">London (UTC+0)</SelectItem>
-                  <SelectItem value="Europe/Paris">Paris (UTC+1)</SelectItem>
-                  <SelectItem value="America/New_York">New York (UTC-5)</SelectItem>
-                  <SelectItem value="America/Los_Angeles">Los Angeles (UTC-8)</SelectItem>
-                </SelectContent>
-              </Select>
+              <div className="flex items-center gap-2 rounded-md border border-slate-800 bg-slate-900/40 px-3 py-2 text-sm text-slate-200">
+                <span className="font-mono">Asia/Ho_Chi_Minh</span>
+                <span className="text-[11px] text-slate-500">·</span>
+                <span className="text-[11px] text-slate-500">UTC+7 (Việt Nam)</span>
+              </div>
             </CardContent>
           </Card>
 

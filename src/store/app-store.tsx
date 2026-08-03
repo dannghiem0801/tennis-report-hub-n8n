@@ -1,4 +1,4 @@
-import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState, type Dispatch, type MutableRefObject, type SetStateAction, type ReactNode } from "react";
 import type {
   BatchEntryResult,
   BatchSummary,
@@ -9,18 +9,22 @@ import type {
   Settings,
   Tournament,
   WatchlistEntry,
+  WatchlistStatus,
 } from "@/types";
 import { storage } from "./persistence";
 import { DEFAULT_TEMPLATES, migrateBundledTemplates } from "@/reports/templates";
 import { migrateLLMConfig } from "@/api/llm";
 import { generateReport, getMatchWinner, getFinalScore } from "@/reports/generate";
-import { formatDateKey, formatTime, parseDateKey, uid } from "@/lib/utils";
+import { formatDateKey, formatTime, parseDateKey, uid, APP_TIMEZONE } from "@/lib/utils";
 import {
   clearApiCache,
   getMatchesByDate,
-  TennisApiError,
-} from "@/api/tennis";
-import { mapMatchesBatch } from "@/api/tennis-mapper";
+  getMatchDetails,
+  getPointByPoint,
+  FlashscoreApiError,
+  setRateLimitedListener,
+} from "@/api/flashscore";
+import { mapMatchesBatch, mapMatchDetails, mapPointByPoint } from "@/api/flashscore-mapper";
 
 interface AppState {
   // data
@@ -102,6 +106,68 @@ interface AppState {
 }
 
 const AppContext = createContext<AppState | null>(null);
+
+/**
+ * Fire-and-forget helper: fetch BOTH per-set details AND point-by-point
+ * for a watchlist match, in parallel, then patch matches state with
+ * whichever data succeeded. Used by addToWatchlist, the
+ * live→completed effect, and the report-generation pipeline.
+ *
+ * Two endpoints are involved:
+ *   - /matches/details         → sets[] (per-set games) + stats
+ *   - /matches/.../point-by-point → game-by-game breakdown
+ *
+ * We fetch both in parallel because they're independent and the user
+ * typically wants both for a watchlist match. The cache layer in
+ * flashscore.ts dedupes concurrent calls to the same key.
+ *
+ * - Dedupes via `requestedRef` (in-session, one entry per match ID).
+ * - 7-day cache for both endpoints (across sessions).
+ * - Partial success is OK: if details fails but PBP succeeds, we still
+ *   patch the PBP. The match just shows PBP without per-set games.
+ * - Silent fail on both: logs a warning and removes the match from the
+ *   requested set so a future remount can retry.
+ */
+async function fetchAndCacheMatchData(
+  matchId: string,
+  apiKey: string,
+  requestedRef: MutableRefObject<Set<string>>,
+  setMatches: Dispatch<SetStateAction<Match[]>>,
+): Promise<{ sets?: Match["sets"]; pointByPoint?: Match["pointByPoint"]; stats?: Match["stats"] }> {
+  // Fire both calls in parallel. allSettled guarantees we get both
+  // outcomes even if one rejects.
+  const [detailsResult, pbpResult] = await Promise.allSettled([
+    getMatchDetails({ apiKey, matchId }).then(mapMatchDetails),
+    getPointByPoint({ apiKey, matchId }).then(mapPointByPoint),
+  ]);
+
+  const details = detailsResult.status === "fulfilled" ? detailsResult.value : null;
+  const pbp = pbpResult.status === "fulfilled" ? pbpResult.value : null;
+
+  if (detailsResult.status === "rejected") {
+    // eslint-disable-next-line no-console
+    console.warn(`[details] Failed to fetch ${matchId}:`, detailsResult.reason);
+  }
+  if (pbpResult.status === "rejected") {
+    requestedRef.current.delete(matchId);
+    // eslint-disable-next-line no-console
+    console.warn(`[pbp] Failed to fetch ${matchId}:`, pbpResult.reason);
+  }
+
+  // Patch only the fields that succeeded.
+  const patch: Partial<Match> = {};
+  if (details?.sets && details.sets.length > 0) patch.sets = details.sets;
+  if (details?.stats) patch.stats = details.stats;
+  if (pbp && pbp.sets.length > 0) patch.pointByPoint = pbp;
+
+  if (Object.keys(patch).length > 0) {
+    setMatches((current) =>
+      current.map((m) => (m.id === matchId ? { ...m, ...patch } : m))
+    );
+  }
+
+  return { sets: patch.sets, pointByPoint: patch.pointByPoint, stats: patch.stats };
+}
 
 export function AppProvider({ children }: { children: ReactNode }) {
   // user data
@@ -210,26 +276,32 @@ export function AppProvider({ children }: { children: ReactNode }) {
           return;
         }
 
-        // Real API path: livescore6 tennis workflow (single call per day).
-        //   GET /matches/v2/list-by-date?Category=tennis&Date=YYYYMMDD&Timezone=7
-        //   Response: { Ts, Stages: [{ Sid, Snm, Cnm, Events: [...] }] }
-        // The mapper flattens Stages → Events (doubles filtered out).
-        // Cached 2 min, in-flight deduped inside tennis.ts.
+        // Real API path: FlashScore4 (single call per day).
+        //   GET /api/flashscore/v2/matches/list-by-date?sport_id=2&date=YYYY-MM-DD&timezone=Asia/Ho_Chi_Minh
+        //   Response shape: TBD — mapper handles multiple common patterns
+        //   defensively (see src/api/flashscore-mapper.ts for path arrays).
+        // Cached 30 min, in-flight deduped inside flashscore.ts.
         const payload = await getMatchesByDate({
           apiKey,
+          sportId: 2, // tennis
           date: dateKey,
-          timezone: 7,
+          timezone: APP_TIMEZONE,
         });
-        const stageCount = payload?.Stages?.length ?? 0;
-        const eventCount = (payload?.Stages ?? []).reduce(
-          (sum, s) => sum + (s.Events?.length ?? 0),
-          0
-        );
-        // Diagnostic: log counts so you can see in DevTools if the call
-        // returned 0 (legitimate empty day) or a real payload.
+        const payloadInfo = (() => {
+          if (Array.isArray(payload)) return `array[${payload.length}]`;
+          if (payload && typeof payload === "object") {
+            const keys = Object.keys(payload).slice(0, 5).join(",");
+            return `object{keys=[${keys}]}`;
+          }
+          return `typeof=${typeof payload}`;
+        })();
+        // Diagnostic: log so you can see in DevTools if the call
+        // returned 0 (legitimate empty day) or a real payload. The
+        // mapper's findMatchesArray() handles all common shapes; this
+        // is just a quick top-level sanity check.
         // eslint-disable-next-line no-console
         console.log(
-          `[tennis-api] date=${dateKey} stages=${stageCount} events=${eventCount}`
+          `[flashscore-api] date=${dateKey} payload=${payloadInfo}`
         );
 
         const { matches: mappedMatches, tournaments: mappedTournaments } = mapMatchesBatch({
@@ -257,14 +329,15 @@ export function AppProvider({ children }: { children: ReactNode }) {
             try {
               const fallbackPayload = await getMatchesByDate({
                 apiKey,
+                sportId: 2,
                 date: key,
-                timezone: 7,
+                timezone: APP_TIMEZONE,
               });
               const fb = mapMatchesBatch({ payload: fallbackPayload, dateKey: key });
               if (fb.matches.length > 0) {
                 // eslint-disable-next-line no-console
                 console.log(
-                  `[tennis-api] auto-picked ${key} (${fb.matches.length} matches) for empty date ${dateKey}`
+                  `[flashscore-api] auto-picked ${key} (${fb.matches.length} matches) for empty date ${dateKey}`
                 );
                 setMatches(fb.matches);
                 setTournaments(fb.tournaments);
@@ -281,7 +354,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
       } catch (e) {
         // Special-case 429: set a 60s cooldown so polling + manual refresh
         // pause and don't keep hammering the API.
-        if (e instanceof TennisApiError && e.code === "rate_limited") {
+        if (e instanceof FlashscoreApiError && e.code === "rate_limited") {
           const until = new Date(Date.now() + 60_000);
           setRateLimitUntil(until);
           setMatchError(
@@ -327,8 +400,9 @@ export function AppProvider({ children }: { children: ReactNode }) {
         try {
           const payload = await getMatchesByDate({
             apiKey: settings.rapidApiKey,
+            sportId: 2,
             date: key,
-            timezone: 7,
+            timezone: APP_TIMEZONE,
           });
           const { matches: foundMatches } = mapMatchesBatch({ payload, dateKey: key });
           if (foundMatches.length > 0) {
@@ -382,8 +456,54 @@ export function AppProvider({ children }: { children: ReactNode }) {
     };
   }, [settings.pollingIntervalMinutes, selectedDate, fetchMatches, isRateLimited]);
 
+  // Lazily enrich watchlist matches with per-set details + point-by-point.
+  //
+  // list-by-date gives us `scores: {home, away}` (set count only) and
+  // status, but NOT per-set game scores. Per-set games (6-4, 6-3) and
+  // the game-by-game breakdown come from /matches/details and
+  // /matches/.../point-by-point respectively.
+  //
+  // We ONLY fetch these for watchlist matches — not for every completed
+  // match on the dashboard. Rationale:
+  //   - Dashboard only needs status + set count, both already in
+  //     list-by-date. Adding details to the dashboard would burn the
+  //     1,000 req/day budget on matches the user never reports on.
+  //   - Watchlist matches need full data for the PBP tab + LLM prompt.
+  //
+  // fetchAndCacheMatchData fires BOTH calls in parallel; partial success
+  // is fine (e.g. PBP succeeds but details 429s — we still get PBP).
+  //
+  // Triggers:
+  //   1. addToWatchlist(match) — match is already completed when added
+  //   2. watchlist match transitions live/scheduled → completed
+  //      (caught by this effect when matches state updates)
+  //
+  // 7-day cache (in flashscore.ts) means subsequent views return from
+  // localStorage without a network call. Failed fetches fail silently —
+  // report generation falls back to web search via the LLM tool.
+  const enrichRequestedRef = useRef<Set<string>>(new Set());
+
+  useEffect(() => {
+    if (!settings.rapidApiKey?.trim()) return;
+    const apiKey = settings.rapidApiKey.trim();
+    const watchlistIds = new Set(watchlist.map((e) => e.matchApiId));
+    const needsEnrich = matches.filter(
+      (m) =>
+        watchlistIds.has(m.id) &&
+        m.status === "completed" &&
+        // Trigger if EITHER sets OR PBP is missing — the helper
+        // patches whichever it can fetch.
+        (!m.sets || m.sets.length === 0 || !m.pointByPoint) &&
+        !enrichRequestedRef.current.has(m.id)
+    );
+    for (const m of needsEnrich) {
+      enrichRequestedRef.current.add(m.id);
+      void fetchAndCacheMatchData(m.id, apiKey, enrichRequestedRef, setMatches);
+    }
+  }, [matches, watchlist, settings.rapidApiKey]);
+
   // Helper: after matches OR watchlist change, check if any pending entries
-  // have matches that are now completed — trigger report generation.
+  // have matches that are now completed — kick off the report pipeline.
   useEffect(() => {
     if (matches.length === 0) return;
     setWatchlist((current) => {
@@ -396,7 +516,15 @@ export function AppProvider({ children }: { children: ReactNode }) {
         if (!match) return entry;
         if (match.status === "completed") {
           changed = true;
-          return { ...entry, status: "generating" as const };
+          // Move entry to the entry point of the pipeline. The
+          // runGeneration function will then walk through
+          // fetching-pbp → building-context → (web-searching) →
+          // consolidating → completed.
+          return {
+            ...entry,
+            status: "fetching-pbp" as const,
+            pipelineStartedAt: new Date().toISOString(),
+          };
         }
         return entry;
       });
@@ -424,14 +552,24 @@ export function AppProvider({ children }: { children: ReactNode }) {
   const llmQueueRef = useRef<Promise<unknown>>(Promise.resolve());
 
   useEffect(() => {
-    const toGenerate = watchlist.filter((e) => e.status === "generating");
+    // The pipeline is entry-pointed by "fetching-pbp" (set by the
+    // pending-→-active effect above). Any subsequent state
+    // (building-context, web-searching, consolidating) is reached from
+    // inside runGeneration.
+    const PIPELINE_ENTRY_STATES = new Set<WatchlistStatus>([
+      "fetching-pbp",
+      "building-context",
+      "web-searching",
+      "consolidating",
+    ]);
+    const toGenerate = watchlist.filter((e) => PIPELINE_ENTRY_STATES.has(e.status));
     if (toGenerate.length === 0) return;
     toGenerate.forEach((entry) => {
       // Skip if we're already in the middle of generating this one
       if (generatingInFlightRef.current.has(entry.id)) return;
       const match = matches.find((m) => m.id === entry.matchApiId);
       if (!match || match.status !== "completed") {
-        // revert
+        // Match was removed or not completed — revert to pending
         setWatchlist((w) => w.map((e) => (e.id === entry.id ? { ...e, status: "pending" as const } : e)));
         return;
       }
@@ -457,32 +595,140 @@ export function AppProvider({ children }: { children: ReactNode }) {
   // in-flight flag. Extracted to keep the effect body readable.
   function runGeneration(entry: WatchlistEntry, match: Match) {
     return (async () => {
+      /**
+       * State-machine transitions for the report-generation pipeline.
+       * Each step's status is committed to state BEFORE the step runs,
+       * so the UI can show real-time progress.
+       */
+      const transition = (
+        status: WatchlistStatus,
+        patch: Partial<WatchlistEntry> = {},
+      ) => {
+        setWatchlist((w) =>
+          w.map((e) => {
+            if (e.id !== entry.id) return e;
+            const isFirstNonPending = e.status === "pending" && status !== "pending";
+            return {
+              ...e,
+              ...patch,
+              status,
+              pipelineStartedAt: isFirstNonPending
+                ? new Date().toISOString()
+                : e.pipelineStartedAt,
+            };
+          }),
+        );
+      };
+
       try {
+        // ─── Step 1: fetch details + PBP (parallel) ──────────────────
+        // The watchlist match is the ONLY place we call /matches/details
+        // and /matches/.../point-by-point. The dashboard never fetches
+        // these (set count from list-by-date is enough for dashboard
+        // rendering), so by the time a match reaches the report
+        // pipeline, it should already have at least one of {sets,
+        // pointByPoint} cached from the watchlist add / live→completed
+        // effect. We re-check here in case the cache was cleared or the
+        // match transitioned to completed between sessions.
+        let matchWithPBP = match;
+        if (
+          match.status === "completed" &&
+          (!match.sets || match.sets.length === 0 || !match.pointByPoint) &&
+          settings.rapidApiKey?.trim()
+        ) {
+          transition("fetching-pbp");
+          try {
+            const apiKey = settings.rapidApiKey.trim();
+            // Run both calls in parallel; partial success is fine.
+            const [detailsResult, pbpResult] = await Promise.allSettled([
+              getMatchDetails({ apiKey, matchId: match.id }).then(mapMatchDetails),
+              getPointByPoint({ apiKey, matchId: match.id }).then(mapPointByPoint),
+            ]);
+
+            const patch: Partial<Match> = {};
+            if (
+              detailsResult.status === "fulfilled" &&
+              detailsResult.value.sets &&
+              detailsResult.value.sets.length > 0
+            ) {
+              patch.sets = detailsResult.value.sets;
+              if (detailsResult.value.stats) patch.stats = detailsResult.value.stats;
+            }
+            if (pbpResult.status === "fulfilled" && pbpResult.value) {
+              patch.pointByPoint = pbpResult.value;
+            }
+            if (Object.keys(patch).length > 0) {
+              matchWithPBP = { ...match, ...patch };
+              setMatches((current) =>
+                current.map((m) => (m.id === match.id ? { ...m, ...patch } : m))
+              );
+            }
+
+            if (detailsResult.status === "rejected") {
+              // eslint-disable-next-line no-console
+              console.warn(
+                `[pipeline ${entry.id}] details fetch failed (will continue without):`,
+                detailsResult.reason,
+              );
+            }
+            if (pbpResult.status === "rejected") {
+              // eslint-disable-next-line no-console
+              console.warn(
+                `[pipeline ${entry.id}] PBP fetch failed (will continue without):`,
+                pbpResult.reason,
+              );
+            }
+          } catch (err) {
+            // eslint-disable-next-line no-console
+            console.warn(`[pipeline ${entry.id}] enrich fetch failed (will continue without):`, err);
+          }
+        }
+
+        // ─── Step 2: build context (pre-LLM prep) ──────────────────
+        transition("building-context");
+        // The actual data prep happens inside generateReport's
+        // buildPromptContext (templates.ts) + formatPointByPointForLLM.
+        // Nothing async here, but the state lets the UI show the step.
+        // Small artificial yield so the UI can paint the state change.
+        await Promise.resolve();
+
+        // ─── Step 3: web-searching (optional) ───────────────────────
+        // The LLM itself decides whether to call web_search via the
+        // tools it has. We surface this state for ~1.5s after the LLM
+        // emits its first web_search tool call (detected via tool name).
+        // For simplicity, we just record the state; the LLM is given
+        // ~free rein to search or not. This state is observable in
+        // the watchlist badge.
+        const willNeedWebSearch = settings.llm?.enabled !== false; // heuristic
+        if (willNeedWebSearch) {
+          transition("web-searching");
+          // No actual work here — the LLM does this in the next step.
+          // This state is held until the LLM call starts.
+          await new Promise((r) => setTimeout(r, 50));
+        }
+
+        // ─── Step 4: LLM consolidation ──────────────────────────────
+        transition("consolidating");
         const report = await generateReport({
-          match,
+          match: matchWithPBP,
           templates,
           settings,
           watchlistId: entry.id,
         });
-        const winner = getMatchWinner(match);
-        const winnerName = winner === 1 ? match.player1.fullName : match.player2.fullName;
+
+        // ─── Step 5: finalize ───────────────────────────────────────
+        const winner = getMatchWinner(matchWithPBP);
+        const winnerName = winner === 1 ? matchWithPBP.player1.fullName : matchWithPBP.player2.fullName;
         setReports((r) => [report, ...r]);
-        setWatchlist((w) =>
-          w.map((e) =>
-            e.id === entry.id
-              ? {
-                  ...e,
-                  status: "completed" as const,
-                  finalScore: getFinalScore(match.sets || []),
-                  winner: winnerName,
-                }
-              : e
-          )
-        );
-      } catch {
-        setWatchlist((w) =>
-          w.map((e) => (e.id === entry.id ? { ...e, status: "failed" as const } : e))
-        );
+        transition("completed", {
+          finalScore: getFinalScore(matchWithPBP.sets || []),
+          winner: winnerName,
+        });
+      } catch (err) {
+        const errorMessage = err instanceof Error ? err.message : String(err);
+        // eslint-disable-next-line no-console
+        console.error(`[pipeline ${entry.id}] failed:`, err);
+        transition("failed", { errorMessage });
       } finally {
         generatingInFlightRef.current.delete(entry.id);
       }
@@ -540,6 +786,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
   const addToWatchlist = useCallback(
     (match: Match): string | null => {
       let result: string | null = null;
+      let isNewlyAdded = false;
       setWatchlist((current) => {
         const exists = current.find((w) => w.matchApiId === match.id);
         if (exists) {
@@ -562,11 +809,26 @@ export function AppProvider({ children }: { children: ReactNode }) {
           createdAt: new Date().toISOString(),
         };
         result = id;
+        isNewlyAdded = true;
         return [entry, ...current];
       });
+      // Trigger 2: if the match is already completed and was just added to
+      // the watchlist, fire the enrich fetch immediately. (For live/scheduled
+      // matches, the useEffect above will catch the transition later.)
+      if (
+        isNewlyAdded &&
+        match.status === "completed" &&
+        (!match.sets || match.sets.length === 0 || !match.pointByPoint) &&
+        settings.rapidApiKey?.trim() &&
+        !enrichRequestedRef.current.has(match.id)
+      ) {
+        enrichRequestedRef.current.add(match.id);
+        const apiKey = settings.rapidApiKey.trim();
+        void fetchAndCacheMatchData(match.id, apiKey, enrichRequestedRef, setMatches);
+      }
       return result;
     },
-    [selectedDate]
+    [selectedDate, settings.rapidApiKey]
   );
 
   const markReportSeen = useCallback((reportId: string) => {
@@ -617,7 +879,12 @@ export function AppProvider({ children }: { children: ReactNode }) {
       // Cheap ping: list-by-date for today. Returns 200 + (possibly empty)
       // Stages list. If we get a 200, the key + host combo works.
       const today = formatDateKey(new Date());
-      const res = await getMatchesByDate({ apiKey, date: today, timezone: 7 });
+      const res = await getMatchesByDate({
+        apiKey,
+        sportId: 2,
+        date: today,
+        timezone: settings.timezone || "Asia/Ho_Chi_Minh",
+      });
       // No error thrown → key is valid
       void res;
       return null;
@@ -924,6 +1191,22 @@ export function AppProvider({ children }: { children: ReactNode }) {
     clearApiCache();
     setRateLimitUntil(null);
   }, [settings.rapidApiKey]);
+
+  // Register a global rate-limit listener so a 429 from ANY caller
+  // (list-by-date, details, PBP) pauses the dashboard polling, manual
+  // refresh, and the per-match details/PBP effects for the cooldown
+  // window. Without this, only fetchMatches was wired to set
+  // rateLimitUntil, so a 429 from getMatchDetails / getPointByPoint
+  // slipped through and the next match's fetch kept hammering the API.
+  useEffect(() => {
+    setRateLimitedListener((until) => {
+      setRateLimitUntil(until);
+      setMatchError(
+        `Tennis API đã vượt giới hạn request. Auto-refresh và per-match fetch sẽ tạm dừng đến ${formatTime(until)}.`
+      );
+    });
+    return () => setRateLimitedListener(null);
+  }, []);
 
   // Tick every 10s to: (a) auto-clear rateLimitUntil when it expires, and
   // (b) refresh the cache size indicator for the Settings UI.

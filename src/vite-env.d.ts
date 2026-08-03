@@ -19,7 +19,7 @@
  */
 interface ImportMetaEnv {
   // ---- Tennis data ----
-  /** RapidAPI key for livescore6 tennis endpoint. */
+  /** RapidAPI key for flashscore4 tennis endpoint. */
   readonly VITE_RAPID_API_KEY?: string;
 
   // ---- LLM (Anthropic / OpenAI-compatible) ----

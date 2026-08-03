@@ -147,7 +147,7 @@ function PendingItem({
             <span>{formatDateShort(entry.matchDate)}</span>
           </div>
           <div className="mt-1.5 flex items-center gap-1.5">
-            <WatchlistStatusBadge status={entry.status} />
+            <WatchlistStatusBadge status={entry.status} errorMessage={entry.errorMessage} />
             {entry.batchId && (
               <span
                 className="inline-flex items-center gap-0.5 rounded-full border border-blue-700/60 bg-blue-900/30 px-1.5 py-0.5 text-[9px] font-medium text-blue-300"

@@ -98,22 +98,49 @@ Hãy viết bản tin dựa trên dữ liệu được cung cấp trong "Dữ li
 
 **Quan trọng**: KHÔNG bịa đặt tỷ số, tên tay vợt, hoặc thông tin ngoài dữ liệu. Nếu không có thông tin → ghi rõ "không có thông tin" thay vì tự suy đoán.
 
-## Quy trình verify tỷ số từ 2 nguồn (BẮT BUỘC trước khi viết)
+## Quy trình verify tỷ số + point-by-point (UPDATED — API primary, web fallback)
 
-**Mục tiêu thật sự của search/scrape KHÔNG phải là lấy tỷ số** (đã có từ livescore rồi), mà là lấy **point-by-point data** (diễn biến từng game: ai thắng game nào, break point ở game mấy, deuce dài, momentum shift) + **stats chi tiết** (số ace, tỉ lệ first serve, break-point converted). Những thứ này livescore6 KHÔNG có → PHẢI lấy từ web.
+**Quy trình mới** (sau khi tích hợp FlashScore point-by-point endpoint):
 
-Mọi tỷ số đưa vào bản tin vẫn phải khớp với 2 nguồn:
-- **Nguồn #1 (chính)**: livescore (từ "Dữ liệu trận đấu" bên dưới — livescore6 API)
-- **Nguồn #2 (BẮT BUỘC)**: **Flashscore** (https://www.flashscore.com/) — ưu tiên hàng đầu vì chuyên về tennis scores, cập nhật real-time, format chuẩn tỷ số set
+1. **Nguồn #1 (chính, ưu tiên tuyệt đối)**: FlashScore data từ API
+   - \`/matches/list-by-date\` → set count + status
+   - \`/matches/details\` → per-set games + tiebreak + stats
+   - \`/matches/match/point-by-point\` → game-by-game breakdown với break points
+   - Tất cả đã có sẵn trong prompt qua "Dữ liệu trận đấu" + placeholder \`{pointByPoint}\`
 
-**Fallback khi Flashscore không có** (rất hiếm, VD: trận quá nhỏ chưa được Flashscore index): Sofascore → ATP Tour → BBC/ESPN. Bước này là BẮT BUỘC, KHÔNG thể bỏ qua — kể cả khi dữ liệu livescore "có vẻ" rõ ràng. Mục đích: tránh đăng tỷ số sai do data lag, typo, hoặc nhầm trận.
+2. **Nguồn #2 (fallback cho context ngoài trận)**: web search + scrape CHỈ khi cần
+   - Pre-match context (form, H2H, tin tức)
+   - Post-match quotes
+   - Edge case: cross-check tỷ số khi API có vẻ bất thường
 
-### Bước A — Nguồn #1 (livescore)
-- Tỷ số từng set: lấy từ "Dữ liệu trận đấu" bên dưới (livescore6 API → livescore6.p.rapidapi.com).
-- Đây là nguồn CHÍNH cho tỷ số, KHÔNG cần search lại score.
+**QUAN TRỌNG — Dữ liệu đã có sẵn trong prompt, KHÔNG cần web_search cho:**
+- ✅ Tỷ số set (set-by-set scores) — từ \`{setScores}\` placeholder
+- ✅ Tỷ số từng game trong set — từ "Dữ liệu trận đấu" section
+- ✅ Point-by-point (diễn biến từng game, break points, deuce) — từ \`{pointByPoint}\` placeholder
+- ✅ Stats cơ bản (ace, double fault, first serve %, break points) — từ "Dữ liệu trận đấu"
+- ✅ Thời lượng trận — từ "Dữ liệu trận đấu"
 
-### Bước B — Nguồn #2 (Flashscore, BẮT BUỘC) + point-by-point
-**BẮT BUỘC phải gọi \`web_search\` ÍT NHẤT 1 LẦN trước khi viết bài.** Không được skip bước này dù data livescore "có vẻ" đầy đủ.
+**Web search CHỈ dùng khi cần:**
+- Pre-match context (phong độ gần đây, H2H, ranking chi tiết, chấn thương)
+- Post-match quotes (HLV, tay vợt nói gì sau trận)
+- Thông tin giải đấu (lịch sử, ý nghĩa)
+- Cross-check tỷ số nếu \`{pointByPoint}\` rỗng (API fetch fail)
+
+**Khi KHÔNG cần web search:**
+- Tỷ số, per-set games, point-by-point — đã có từ API
+- Stats cơ bản (ace, double fault, first serve %, break points) — đã có từ API
+
+**Khi VẪN cần web search:**
+- \`{pointByPoint}\` rỗng (API fetch fail hoặc match chưa có PBP)
+- Cần context bên ngoài trận
+
+### Bước A — Nguồn #1 (FlashScore API — đã có sẵn)
+- Tỷ số, per-set scores, stats, point-by-point: lấy từ "Dữ liệu trận đấu" + \`{pointByPoint}\` bên dưới
+- KHÔNG cần gọi \`web_search\` chỉ để lấy tỷ số (lãng phí quota + dễ typo)
+
+### Bước B — Fallback web search (CHỈ khi cần)
+
+**KHÔNG BẮT BUỘC** gọi \`web_search\` cho MỌI bài. Chỉ khi \`{pointByPoint}\` rỗng hoặc cần context bên ngoài.
 
 **Mục tiêu search**: tìm URL có **point-by-point** / **game-by-game** / **match statistics** — KHÔNG tìm "final score" (đã biết rồi).
 
@@ -518,6 +545,20 @@ export function buildPromptContext(match: Match): string {
     const fs = match.stats.firstServePct;
     lines.push(
       `- Thống kê: ace ${a.player1}-${a.player2}, % giao bóng 1 ${fs.player1}-${fs.player2}, break ${bp.player1}-${bp.player2}, tổng điểm thắng ${match.stats.totalPointsWon.player1}-${match.stats.totalPointsWon.player2}, thời lượng ${match.stats.matchDurationMinutes} phút`
+    );
+  }
+  if (match.pointByPoint && match.pointByPoint.sets.length > 0) {
+    const pbp = match.pointByPoint;
+    let totalBreaks = { 1: 0, 2: 0 };
+    let deuceGames = 0;
+    for (const set of pbp.sets) {
+      for (const g of set.games) {
+        if (g.isBreak) totalBreaks[g.isBreak]++;
+        if (g.pointSequence.split(",").length >= 6) deuceGames++;
+      }
+    }
+    lines.push(
+      `- Point-by-point: ${pbp.sets.length} set, ${totalBreaks[1] + totalBreaks[2]} break points, ${deuceGames} deuce games (data từ FlashScore API)`
     );
   }
   return lines.join("\n");

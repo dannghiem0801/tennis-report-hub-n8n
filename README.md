@@ -4,7 +4,7 @@ Dashboard lịch thi đấu tennis theo ngày cho phóng viên thể thao Việt
 
 ## ✨ Tính năng
 
-- **Live tennis data**: Kết nối trực tiếp với livescore6 API trên RapidAPI — ATP + WTA + Challenger fixtures theo ngày, kèm tournament tier (Grand Slam → ITF). 100% dữ liệu thật, không có fallback mẫu.
+- **Live tennis data**: Kết nối trực tiếp với FlashScore API trên RapidAPI (`flashscore4.p.rapidapi.com`) — ATP + WTA + Challenger + ITF fixtures theo ngày, kèm tournament tier (Grand Slam → ITF). 100% dữ liệu thật, không có fallback mẫu.
 - **Dashboard trực quan**: Gom trận theo giải, sắp xếp live → scheduled → completed, có banner trạng thái Live API.
 - **Smart date fallback**: khi ngày đang chọn rỗng (off-day, chưa publish lịch), tự động tìm ngày gần nhất có trận trong 7 ngày gần nhất, kèm banner giải thích.
 - **Watchlist**: Theo dõi trận, tự động nhận báo cáo khi trận kết thúc.
@@ -38,7 +38,7 @@ cp .env.example .env.local
 
 | Biến | Mục đích | Mặc định |
 | --- | --- | --- |
-| `VITE_RAPID_API_KEY` | Tennis data (RapidAPI livescore6) | `""` |
+| `VITE_RAPID_API_KEY` | Tennis data (RapidAPI flashscore4) | `""` |
 | `VITE_LLM_ENABLED` | Bật/tắt auto report generation | `false` |
 | `VITE_LLM_PROVIDER` | `anthropic` hoặc `openai-compatible` | `anthropic` |
 | `VITE_LLM_BASE_URL` | Base URL của LLM proxy / API | `https://api.minimax.io/anthropic` |
@@ -90,42 +90,50 @@ curl -X POST http://localhost:5173/__save-env \
 
 > ⚠️ **Bảo mật:** Tất cả biến `VITE_*` đều được Vite inline vào bundle client. Mọi người dùng trang có thể xem được key (View Source → search `VITE_RAPID_API_KEY`). Chấp nhận được cho dùng cá nhân / demo. Cho production, route qua server proxy (xem mục Tech stack bên dưới) để giữ key bí mật.
 
-## 🔌 Tennis API (RapidAPI — livescore6)
+## 🔌 Tennis API (RapidAPI — flashscore4)
 
-1. Đăng ký gói tại [livescore6 trên RapidAPI](https://rapidapi.com/search/livescore6%20tennis) (host: `livescore6.p.rapidapi.com`).
-2. Vào `/settings` → dán `X-RapidAPI-Key` vào ô "RapidAPI Key" → bấm **Test connection** để xác nhận.
+1. Đăng ký gói tại [flashscore4 trên RapidAPI](https://rapidapi.com/search/flashscore4%20tennis) (host: `flashscore4.p.rapidapi.com`).
+2. Vào `/settings` → dán `X-Rapidapi-Key` vào ô "RapidAPI Key" → bấm **Test connection** để xác nhận.
 3. Quay lại Dashboard, hệ thống sẽ tự động gọi API cho ngày đang chọn. Banner sẽ chuyển sang **Live API** (xanh). Nếu chưa có key, dashboard sẽ hiển thị hướng dẫn mở Settings.
 
 **API workflow** (single call trả về toàn bộ trận trong ngày):
 
 ```
-GET /matches/v2/list-by-date?Category=tennis&Date=YYYYMMDD&Timezone=7
-Host: livescore6.p.rapidapi.com
-X-RapidAPI-Key: <key>
+GET /api/flashscore/v2/matches/list-by-date?sport_id=2&date=YYYY-MM-DD&timezone=Asia%2FBangkok
+Host: flashscore4.p.rapidapi.com
+X-Rapidapi-Key: <key>
 ```
 
-Response shape: `{ Ts, Stages: [{ Sid, Snm, Cnm, Events: [...] }] }`
+**sport_id mapping** (từ endpoint `/get-sports`):
+- `1` = Football
+- `2` = Tennis ← app mặc định
+- `3` = Basketball
+- (xem `/get-sports` cho đầy đủ danh sách)
 
-- Mỗi `Stage` = một tournament instance (ví dụ "Mubadala DC Open", ATP 500).
-- Mỗi `Event` = một match (singles hoặc doubles).
-- App tự flatten `Stages → Events` và lọc doubles (UI hiện chỉ hỗ trợ 1v1).
+**Response shape:** Hiện tại TBD — mapper xử lý defensive nhiều pattern phổ biến (flat array, `{ matches }`, `{ data }`, `{ stages/events }`). Sau khi chạy test call thật, paste JSON response vào `src/api/flashscore-mapper.ts` để tighten field paths.
 
-**Timestamps:** API trả về `Esd` dạng `YYYYMMDDHHMMSS` (UTC). Mapper convert sang ISO 8601.
+**Timestamp:** IANA timezone name trong query param (`Asia/Ho_Chi_Minh` cho VN). Response time format tùy API (ISO 8601 hoặc epoch) — mapper tự detect.
 
-**Score per set:** `Tr1S1..S3` / `Tr2S1..S3` là games mỗi set (string-encoded). Nếu một trong hai cột `≥ 10` → set đó kết thúc 7-6 và giá trị là tiebreak sub-score (dùng trong deciding-set super tiebreak).
+**Status mapping:** Mapper chấp nhận cả number (`1`/`2`+ = scheduled/live) và string (`"FT"`/`"NS"`/`"S1"`-`"S5"`/...).
 
-**Status mapping:** `Esid=1` → scheduled, `Esid=6` → completed, `Esid≥90` → live (đang chơi set 1/2/3). Có fallback về `Eps` text (`"FT"`, `"NS"`, `"S1"`, …) cho các status khác.
+**Match details (per-match, for completed matches):**
 
-**Không được expose bởi API này:** country, round, court, surface, ranking, seed. Mapper dùng placeholder:
+```
+GET /api/flashscore/v2/matches/details?match_id=<id>
+```
+
+Trả về set-by-set scores (e.g. `6-4, 3-6, 6-3`) + stats (aces, double faults, first serve %, break points, etc.) mà list-by-date không expose. Dùng để enrich report khi trận đã completed. Cached 24h (kết quả immutable sau khi trận kết thúc).
+
+**Không được expose bởi API này ở endpoint list-by-date** (theo contract hiện tại): country, court, surface, ranking, seed, set scores chi tiết. Mapper dùng placeholder:
 - `country` → `""`, flag → `🏳️`
 - `round` → `"—"`
 - `court` → `undefined`
 - `surface` → `"hard"` (default)
-- Nếu cần data chi tiết hơn, cân nhắc provider khác hoặc gọi thêm endpoint odds/H2H.
+- Set scores/stats → dùng endpoint `/matches/details` (xem trên) — fallback scrape từ web (xem templates.ts)
 
 **Rate limit & cache:**
 - List-by-date: cache 30 phút. Mỗi lần bấm Refresh trong cùng cache window = 0 request.
-- Polling: **mặc định "No Poll" (= 0)** — app không tự fetch, chỉ gọi khi user bấm Refresh. Tối ưu cho quota 500 requests/tháng của RapidAPI (livescore6). Có thể bật lại 1/5/10/15/30 phút nếu cần theo dõi real-time.
+- Polling: **mặc định "No Poll" (= 0)** — app không tự fetch, chỉ gọi khi user bấm Refresh. Tối ưu cho quota 1,000 requests/ngày (hard limit) của RapidAPI (flashscore4). Có thể bật lại 1/5/10/15/30 phút nếu cần theo dõi real-time — với 1,000/ngày thì 5 phút poll (~288 calls/ngày) vẫn dư dả.
 - Worst case: 1 call/refresh. "No Poll" + manual 3-4 buổi/tuần × 2h × 5 refresh = ~40 calls/tuần ≈ **160 calls/tháng** (dư ~340 cho edge cases).
 
 > ⚠️ **Bảo mật:** API key hiện lưu local trong trình duyệt và gửi trực tiếp từ client. Cho production, route qua server proxy (Vite middleware / serverless function) để giữ key bí mật.
@@ -163,7 +171,7 @@ src/
 
 - [x] Sports selector với badge "Coming Soon" cho môn khác
 - [x] Tournament browser với expand/collapse + match rows
-- [x] Live data từ RapidAPI livescore6 (single call: `/matches/v2/list-by-date`)
+- [x] Live data từ RapidAPI flashscore4 (single call: `/api/flashscore/v2/matches/list-by-date`)
 - [x] Smart date fallback: tự tìm ngày gần nhất có trận khi ngày đang chọn rỗng (off-day, chưa publish lịch)
 - [x] Banner trạng thái (Live API) + banner lỗi chi tiết
 - [x] Settings: nút "Test connection" với thông báo lỗi theo mã (401/403/429/CORS)
@@ -193,9 +201,9 @@ src/
 
 Thêm/sửa template: Vào `/templates` → "Tạo mẫu mới" hoặc edit template có sẵn.
 
-Đổi API host/endpoint: Edit `src/api/tennis.ts` (hằng `API_HOST` + hàm `tennisFetch`).
+Đổi API host/endpoint: Edit `src/api/flashscore.ts` (hằng `API_HOST` + hàm `fsFetch`).
 
 Cấu hình polling: Vào `/settings` → "Khoảng thời gian (phút)".
 
-Đổi API host/endpoint: Edit `src/api/tennis.ts` (hằng `API_HOST` + hàm `tennisFetch`).
+Đổi API host/endpoint: Edit `src/api/flashscore.ts` (hằng `API_HOST` + hàm `fsFetch`).
 

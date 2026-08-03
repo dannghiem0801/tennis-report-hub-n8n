@@ -39,9 +39,18 @@ export interface Match {
   player1: Player;
   player2: Player;
   sets?: SetScore[];
+  /** Number of sets won by each player. Populated from the list-by-date
+   *  `scores: {home, away}` field (which only carries set counts, not per-
+   *  set game scores). Always present for completed matches. */
+  setsWon?: { player1: number; player2: number };
   /** In-play game point — can be numeric ("30-15" style) or string
    *  ("40", "A") from the live API. */
   currentSetScore?: { player1: number | string; player2: number | string };
+  /** Point-by-point data for completed matches. Populated lazily when the
+   *  match is added to the watchlist (no point fetching for matches the
+   *  user never reports on). Sourced from
+   *  /api/flashscore/v2/matches/match/point-by-point. */
+  pointByPoint?: PointByPointData;
   stats?: MatchStats;
   court?: string;
   surface?: "hard" | "clay" | "grass";
@@ -57,6 +66,41 @@ export interface MatchStats {
   matchDurationMinutes: number;
 }
 
+/**
+ * Point-by-point data from /matches/match/point-by-point. Each set has
+ * an ordered array of games; each game has the running score, server,
+ * break indicator, and a comma-separated point sequence using tennis
+ * notation (15:0, 30:0, 40:0, A:40, etc.) with break-point markers
+ * like "|B1|" (first break point of the game), "|B2|" (second), etc.
+ */
+export interface PointByPointGame {
+  /** Running games won by player 1 in this set (cumulative). */
+  homeGames: number;
+  /** Running games won by player 2 in this set. */
+  awayGames: number;
+  /** 1 = player 1 won the game, 2 = player 2. */
+  gameWinner: 1 | 2;
+  /** 1 = player 1 broke player 2's serve, 2 = player 2 broke player 1's. null = no break. */
+  isBreak: 1 | 2 | null;
+  /** Who served the game (1 or 2). */
+  server: 1 | 2;
+  /** Comma-separated tennis point notation, e.g. "15:0, 30:0, 40:0 |B1|, 40:15". */
+  pointSequence: string;
+}
+
+export interface PointByPointSet {
+  /** 1-based set number. */
+  setNumber: number;
+  /** Human label from API, e.g. "Set 1". */
+  name: string;
+  /** Ordered games played in this set. */
+  games: PointByPointGame[];
+}
+
+export interface PointByPointData {
+  sets: PointByPointSet[];
+}
+
 export interface Tournament {
   id: string;
   name: string;
@@ -67,11 +111,25 @@ export interface Tournament {
   date: string; // YYYY-MM-DD
 }
 
+/**
+ * Lifecycle of a WatchlistEntry (per-match report generation pipeline).
+ *
+ *   pending → fetching-pbp → building-context → (web-searching) → consolidating → completed
+ *                              ↓ any step ↓
+ *                                              failed
+ *
+ * Each state corresponds to a discrete pipeline step the user can observe
+ * in the watchlist UI (icon + label + tooltip). `generating` (the old
+ * single state) is split into 4 for transparency.
+ */
 export type WatchlistStatus =
-  | "pending"
-  | "generating"
-  | "completed"
-  | "failed";
+  | "pending"           // Waiting for match to reach "completed" status
+  | "fetching-pbp"     // Calling FlashScore /matches/match/point-by-point
+  | "building-context" // Building structured data for LLM (PBP + sets + stats)
+  | "web-searching"    // Running web_search for external context (optional)
+  | "consolidating"    // LLM is generating the report
+  | "completed"        // Report generated and saved
+  | "failed";          // Any step failed; entry holds error message
 
 export interface WatchlistEntry {
   id: string;
@@ -94,6 +152,10 @@ export interface WatchlistEntry {
    *  batch fires (terminal state). UI uses this to show the ⏰ badge
    *  next to the entry in the watchlist. */
   batchId?: string;
+  /** Set when status === "failed". UI surfaces this in a tooltip / banner. */
+  errorMessage?: string;
+  /** When the pipeline started (any non-pending state). For "time elapsed" UI. */
+  pipelineStartedAt?: string;
 }
 
 export interface Report {
