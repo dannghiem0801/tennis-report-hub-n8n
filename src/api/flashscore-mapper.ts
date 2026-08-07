@@ -68,16 +68,24 @@
 
 import type {
   Match,
-  MatchStats,
   MatchStatus,
-  Player,
+  Participant,
   PointByPointData,
   PointByPointGame,
+  ScoreLine,
   SetScore,
+  TennisMatch,
+  TennisMatchStats,
   Tournament,
   TournamentCategory,
 } from "@/types";
 import { flagFromAlpha2 } from "./country-flags";
+
+/** Local alias for the tennis player shape. */
+type Player = Extract<Participant, { kind: "player" }>;
+
+/** Local alias — TennisMatchStats is the new name (was MatchStats). */
+type MatchStats = TennisMatchStats;
 
 /* ------------------------------------------------------------------ */
 /*  Field extractors                                                   */
@@ -174,6 +182,7 @@ function buildTournament(raw: any, dateKey: string): Tournament {
     location,
     surface,
     date: dateKey,
+    sport: "tennis", // v1.5 MVP: mapper is tennis-only; football v1.6
   };
 }
 
@@ -195,7 +204,7 @@ function extractCountryFromFlagUrl(url: string | undefined | null): string {
 
 function buildPlayerFromTeam(team: any): Player {
   if (!team || typeof team !== "object") {
-    return { name: "TBD", fullName: "TBD", country: "", countryFlag: "🏳️" };
+    return { kind: "player" as const, name: "TBD", fullName: "TBD", country: "", countryFlag: "🏳️" };
   }
   // The API's `name` field is already the full name (e.g. "Wong C." for
   // Asian names, "Alex de Minaur" for Western). We use it as BOTH `name`
@@ -218,6 +227,7 @@ function buildPlayerFromTeam(team: any): Player {
   const countryFlag = alpha2 ? flagFromAlpha2(alpha2) : "🏳️";
 
   return {
+    kind: "player" as const,
     name: fullName,
     fullName,
     country,
@@ -388,18 +398,19 @@ function buildMatch(
     "score",
     "result",
   ]);
-  const setsWon =
+  const setsWon: { side1: number; side2: number } | undefined =
     rawScores &&
     typeof rawScores === "object" &&
     (typeof rawScores.home === "number" || typeof rawScores.away === "number")
       ? {
-          player1: rawScores.home ?? 0,
-          player2: rawScores.away ?? 0,
+          side1: rawScores.home ?? 0,
+          side2: rawScores.away ?? 0,
         }
       : undefined;
 
   return {
     id: matchId,
+    sport: "tennis" as const, // v1.5 MVP: mapper is tennis-only
     tournamentId: tournament.id,
     tournamentName: tournament.name,
     tournamentCategory: tournament.category,

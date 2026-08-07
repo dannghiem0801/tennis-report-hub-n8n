@@ -129,14 +129,14 @@ function PendingItem({
       <div className="flex items-start justify-between gap-2">
         <div className="min-w-0 flex-1">
           <div className="flex items-center gap-1.5 text-[12px] text-slate-200">
-            <span>{entry.player1Flag}</span>
+            <span>{entry.side1Flag}</span>
             <span className="truncate font-medium">
-              {entry.player1Name}
+              {entry.side1Name}
             </span>
             <span className="text-slate-500">vs</span>
-            <span>{entry.player2Flag}</span>
+            <span>{entry.side2Flag}</span>
             <span className="truncate font-medium">
-              {entry.player2Name}
+              {entry.side2Name}
             </span>
           </div>
           <div className="mt-1 flex items-center gap-2 text-[10px] text-slate-500">

@@ -18,7 +18,7 @@ import { Plus, Star, Edit3, Trash2, FileText, Check, X, Sparkles } from "lucide-
 import type { ReportTemplate } from "@/types";
 
 export function TemplatesPage() {
-  const { templates, setDefaultTemplate, updateTemplate, deleteTemplate, addTemplate } = useApp();
+  const { templates, setDefaultTemplate, updateTemplate, deleteTemplate, addTemplate, activeSport } = useApp();
   const [editingId, setEditingId] = useState<string | null>(null);
   const [draft, setDraft] = useState<ReportTemplate | null>(null);
   const [creatingNew, setCreatingNew] = useState(false);
@@ -226,6 +226,7 @@ export function TemplatesPage() {
               onClick={() => {
                 if (!newTemplate.name || !newTemplate.content) return;
                 addTemplate({
+                  sport: activeSport,
                   name: newTemplate.name,
                   description: newTemplate.description,
                   content: newTemplate.content,

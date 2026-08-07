@@ -18,9 +18,9 @@
 import * as React from "react";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { cn } from "@/lib/utils";
-import type { Match, PointByPointData, PointByPointGame, PointByPointSet } from "@/types";
+import type { PointByPointData, PointByPointGame, PointByPointSet, TennisMatch } from "@/types";
 
-export function PointByPointViewer({ match }: { match: Match }) {
+export function PointByPointViewer({ match }: { match: TennisMatch }) {
   const pbp = match.pointByPoint;
   if (!pbp || pbp.sets.length === 0) return null;
 
@@ -72,7 +72,7 @@ function SetView({
   isLastSet,
 }: {
   set: PointByPointSet;
-  match: Match;
+  match: TennisMatch;
   isLastSet: boolean;
 }) {
   return (
@@ -276,7 +276,7 @@ function PointSequence({ seq }: { seq: string }) {
 /*  Final banner (sets won, shown at end of last set)                  */
 /* ------------------------------------------------------------------ */
 
-function FinalBanner({ match }: { match: Match }) {
+function FinalBanner({ match }: { match: TennisMatch }) {
   const setsWon = match.setsWon;
   const p1Sets = setsWon?.player1 ?? 0;
   const p2Sets = setsWon?.player2 ?? 0;

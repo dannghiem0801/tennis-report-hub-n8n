@@ -1,4 +1,4 @@
-import type { Match, ReportTemplate } from "@/types";
+import type { FootballMatch, Match, ReportTemplate, Sport, TennisMatch } from "@/types";
 import { formatDateVi, formatTime } from "@/lib/utils";
 
 /**
@@ -363,6 +363,7 @@ Dưới đây là dữ liệu thô về trận đấu. Hãy viết bản tin d�
 export const DEFAULT_TEMPLATES: ReportTemplate[] = [
   {
     id: "tpl-prompt",
+    sport: "tennis",
     name: "Tennis Recap · Prompt (Mặc định)",
     description:
       "Prompt tiếng Việt cho LLM. Match data được tự động chèn vào cuối prompt. Paste prompt vào LLM (ChatGPT, Claude, Gemini) rồi paste response vào báo cáo.",
@@ -373,6 +374,7 @@ export const DEFAULT_TEMPLATES: ReportTemplate[] = [
   },
   {
     id: "tpl-default",
+    sport: "tennis",
     name: "Tennis Recap (Cổ điển)",
     description: "Báo cáo tiếng Việt 200-400 từ, diễn biến set-by-set kèm thống kê.",
     isDefault: false,
@@ -400,6 +402,7 @@ Trận đấu này là một trong những cuộc đối đầu đáng chú ý n
   },
   {
     id: "tpl-concise",
+    sport: "tennis",
     name: "Brief (Ngắn gọn)",
     description: "Báo cáo ngắn 120-180 từ, tập trung vào kết quả và điểm nhấn chính.",
     isDefault: false,
@@ -415,6 +418,7 @@ Trận đấu này là một trong những cuộc đối đầu đáng chú ý n
   },
   {
     id: "tpl-dramatic",
+    sport: "tennis",
     name: "Dramatic (Kịch tính)",
     description: "Văn phong mạnh mẽ, nhấn mạnh drama và bước ngoặt của trận đấu.",
     isDefault: false,
@@ -433,6 +437,60 @@ Bước ngoặt đến ở {turningPoint} khi {winnerFull} bẻ game thành côn
 Với {acesWinner} ace và {bpConverted} break-point được tận dụng, {winnerFull} xứng đáng với chiến thắng và tiếp tục khẳng định vị trí trên bảng xếp hạng thế giới.`,
   },
 ];
+
+/* ------------------------------------------------------------------ */
+/*  Football templates (v1.5 — multi-sport)                            */
+/*                                                                    */
+/*  v1.5 MVP ships ONE default football template: a literal markdown  */
+/*  recap that uses football-specific placeholders ({home}, {away},  */
+/*  {score}, {htScore}, {goalNarrative}, {possessionHome}, ...). The  */
+/*  user can clone this in /templates to make "Ngắn gọn" and "Kịch    */
+/*  tính" variants. A bundled "prompt" template will land in v1.6     */
+/*  when the football LLM workflow is fully fleshed out.              */
+/* ------------------------------------------------------------------ */
+
+const FOOTBALL_DEFAULT_LITERAL: ReportTemplate = {
+  id: "tpl-football-default",
+  sport: "football",
+  name: "Bóng đá Recap (Mặc định)",
+  description: "Báo cáo tiếng Việt 200-400 từ, diễn biến trận đấu theo bàn thắng + thống kê.",
+  isDefault: true,
+  kind: "literal",
+  bundledVersion: BUNDLED_TEMPLATES_VERSION,
+  content: `**{tournament} – {round}{outcomeLabel}**
+
+{home} ({flagHome}) tiếp đón {away} ({flagAway}) trên sân {venue} tại vòng đấu này của {tournament}. Trận đấu kết thúc với tỉ số {score} nghiêng về phía {winner}.
+
+**Diễn biến trận đấu**
+
+{goalNarrative}
+
+{momentumNote}
+
+**Tỉ số từng phần**
+
+- Hiệp 1: {htScore}
+- Chung cuộc: {score}
+
+**Điểm nhấn thống kê**
+
+Về kiểm soát bóng, {home} nắm {possessionHome}% so với {possessionAway}% của {away}. Tổng số cú sút: {home} {shotsHome} - {shotsAway} {away}, trong đó sút trúng đích {shotsOnTargetHome}-{shotsOnTargetAway}. Phạt góc {cornersHome}-{cornersAway}, phạm lỗi {foulsHome}-{foulsAway}. Thẻ phạt: thẻ vàng {yellowHome}-{yellowAway}, thẻ đỏ {redHome}-{redAway}.
+
+**Bối cảnh**
+
+{contextNote}`,
+};
+
+/**
+ * All bundled templates across all sports. The app-store installs the
+ * per-sport subset on first load (e.g. `DEFAULT_TEMPLATES_BY_SPORT.tennis`
+ * goes into localStorage under `trh:tennis:templates`).
+ */
+export const DEFAULT_TEMPLATES_BY_SPORT: Record<Sport, ReportTemplate[]> = {
+  tennis: DEFAULT_TEMPLATES,
+  football: [FOOTBALL_DEFAULT_LITERAL],
+  basketball: [],
+};
 
 /* ------------------------------------------------------------------ */
 /*  Helpers                                                             */
@@ -474,8 +532,24 @@ export function migrateBundledTemplates(saved: ReportTemplate[]): ReportTemplate
   return result;
 }
 
-export function getDefaultTemplate(templates: ReportTemplate[]): ReportTemplate {
-  return templates.find((t) => t.isDefault) || templates[0] || DEFAULT_TEMPLATES[0];
+/**
+ * Pick the sport-specific default template. The first arg is the
+ * full templates list (any sport); the second scopes which sport we
+ * want. Returns the template marked `isDefault: true` for that
+ * sport, falling back to the first template of that sport, then the
+ * bundled default for the sport.
+ */
+export function getDefaultTemplate(
+  templates: ReportTemplate[],
+  sport: Sport
+): ReportTemplate {
+  const sportTemplates = templates.filter((t) => t.sport === sport);
+  return (
+    sportTemplates.find((t) => t.isDefault) ||
+    sportTemplates[0] ||
+    DEFAULT_TEMPLATES_BY_SPORT[sport]?.[0] ||
+    DEFAULT_TEMPLATES[0]
+  );
 }
 
 const SURFACE_LABELS: Record<string, string> = {
@@ -484,7 +558,7 @@ const SURFACE_LABELS: Record<string, string> = {
   grass: "cỏ",
 };
 
-function getWinner(m: Match): 1 | 2 | null {
+function getTennisWinner(m: TennisMatch): 1 | 2 | null {
   if (m.status !== "completed" || !m.sets || m.sets.length === 0) return null;
   let p1 = 0;
   let p2 = 0;
@@ -497,7 +571,14 @@ function getWinner(m: Match): 1 | 2 | null {
   return null;
 }
 
-function formatSetScores(m: Match): string {
+function getFootballWinnerHelper(m: FootballMatch): 1 | 2 | null {
+  if (m.status !== "completed" || !m.finalScore) return null;
+  if (m.finalScore.side1 > m.finalScore.side2) return 1;
+  if (m.finalScore.side2 > m.finalScore.side1) return 2;
+  return null;
+}
+
+function formatTennisSetScores(m: TennisMatch): string {
   if (!m.sets || m.sets.length === 0) return "—";
   return m.sets
     .map((s) => {
@@ -512,43 +593,50 @@ function formatSetScores(m: Match): string {
  * appended to the few-shot prompt template so the LLM has everything it needs
  * to write the recap.
  *
- * Keeps a fixed Vietnamese shape so different reports look uniform.
+ * Sport-aware (ADR 0002): dispatches to tennis or football context based on
+ * `match.sport`. The shape is sport-specific — tennis has sets, aces, PBP;
+ * football has goals, halftime, events, possession.
  */
 export function buildPromptContext(match: Match): string {
-  const start = new Date(match.startTime);
-  const winner = getWinner(match);
-  const winnerName = winner === 1 ? match.player1.fullName : winner === 2 ? match.player2.fullName : "—";
-  const countryName = (c: string) => {
-    if (!c) return "—";
-    return c.toUpperCase();
-  };
-  const surface = match.surface ? SURFACE_LABELS[match.surface] || match.surface : "—";
+  if (match.sport === "football") {
+    return buildFootballPromptContext(match);
+  }
+  return buildTennisPromptContext(match);
+}
+
+function buildTennisPromptContext(match: Match): string {
+  const t = match as TennisMatch;
+  const start = new Date(t.startTime);
+  const winner = getTennisWinner(t);
+  const winnerName = winner === 1 ? t.player1.fullName : winner === 2 ? t.player2.fullName : "—";
+  const countryName = (c: string) => (c ? c.toUpperCase() : "—");
+  const surface = t.surface ? SURFACE_LABELS[t.surface] || t.surface : "—";
 
   const lines: string[] = [];
   lines.push(`- Ngày giờ: ${formatDateVi(start)}, ${formatTime(start)}`);
-  lines.push(`- Giải đấu: ${match.tournamentName}`);
-  lines.push(`- Vòng đấu: ${match.round}`);
-  lines.push(`- Địa điểm: ${match.court || match.tournamentName}`);
+  lines.push(`- Giải đấu: ${t.tournamentName}`);
+  lines.push(`- Vòng đấu: ${t.round}`);
+  lines.push(`- Địa điểm: ${t.court || t.tournamentName}`);
   lines.push(`- Mặt sân: ${surface}`);
-  lines.push(`- Tay vợt 1: ${match.player1.fullName} (${countryName(match.player1.country)}, hạng ${match.player1.ranking ?? "—"}${match.player1.seed ? `, hạt giống ${match.player1.seed}` : ""})`);
-  lines.push(`- Tay vợt 2: ${match.player2.fullName} (${countryName(match.player2.country)}, hạng ${match.player2.ranking ?? "—"}${match.player2.seed ? `, hạt giống ${match.player2.seed}` : ""})`);
-  lines.push(`- Trạng thái: ${match.status === "completed" ? "Đã kết thúc" : match.status === "live" ? "Đang diễn ra" : "Chưa diễn ra"}`);
-  if (match.sets && match.sets.length > 0) {
-    lines.push(`- Tỷ số các set: ${formatSetScores(match)}`);
+  lines.push(`- Tay vợt 1: ${t.player1.fullName} (${countryName(t.player1.country)}, hạng ${t.player1.ranking ?? "—"}${t.player1.seed ? `, hạt giống ${t.player1.seed}` : ""})`);
+  lines.push(`- Tay vợt 2: ${t.player2.fullName} (${countryName(t.player2.country)}, hạng ${t.player2.ranking ?? "—"}${t.player2.seed ? `, hạt giống ${t.player2.seed}` : ""})`);
+  lines.push(`- Trạng thái: ${t.status === "completed" ? "Đã kết thúc" : t.status === "live" ? "Đang diễn ra" : "Chưa diễn ra"}`);
+  if (t.sets && t.sets.length > 0) {
+    lines.push(`- Tỷ số các set: ${formatTennisSetScores(t)}`);
   }
   if (winner) {
     lines.push(`- Người thắng: ${winnerName}`);
   }
-  if (match.stats) {
-    const a = match.stats.aces;
-    const bp = match.stats.breakPointsConverted;
-    const fs = match.stats.firstServePct;
+  if (t.stats) {
+    const a = t.stats.aces;
+    const bp = t.stats.breakPointsConverted;
+    const fs = t.stats.firstServePct;
     lines.push(
-      `- Thống kê: ace ${a.player1}-${a.player2}, % giao bóng 1 ${fs.player1}-${fs.player2}, break ${bp.player1}-${bp.player2}, tổng điểm thắng ${match.stats.totalPointsWon.player1}-${match.stats.totalPointsWon.player2}, thời lượng ${match.stats.matchDurationMinutes} phút`
+      `- Thống kê: ace ${a.player1}-${a.player2}, % giao bóng 1 ${fs.player1}-${fs.player2}, break ${bp.player1}-${bp.player2}, tổng điểm thắng ${t.stats.totalPointsWon.player1}-${t.stats.totalPointsWon.player2}, thời lượng ${t.stats.matchDurationMinutes} phút`
     );
   }
-  if (match.pointByPoint && match.pointByPoint.sets.length > 0) {
-    const pbp = match.pointByPoint;
+  if (t.pointByPoint && t.pointByPoint.sets.length > 0) {
+    const pbp = t.pointByPoint;
     let totalBreaks = { 1: 0, 2: 0 };
     let deuceGames = 0;
     for (const set of pbp.sets) {
@@ -560,6 +648,79 @@ export function buildPromptContext(match: Match): string {
     lines.push(
       `- Point-by-point: ${pbp.sets.length} set, ${totalBreaks[1] + totalBreaks[2]} break points, ${deuceGames} deuce games (data từ FlashScore API)`
     );
+  }
+  return lines.join("\n");
+}
+
+function buildFootballPromptContext(match: Match): string {
+  const m = match as FootballMatch;
+  const start = new Date(m.startTime);
+  const winner = getFootballWinnerHelper(m);
+  const winnerName =
+    winner === 1 ? m.home.name : winner === 2 ? m.away.name : "—";
+  const countryName = (c: string) => (c ? c.toUpperCase() : "—");
+
+  const lines: string[] = [];
+  lines.push(`- Ngày giờ: ${formatDateVi(start)}, ${formatTime(start)}`);
+  lines.push(`- Giải đấu: ${m.tournamentName}`);
+  lines.push(`- Vòng đấu: ${m.round}`);
+  lines.push(`- Sân vận động: ${m.venue || "—"}`);
+  lines.push(`- Trọng tài: ${m.referee || "—"}`);
+  lines.push(`- Đội nhà: ${m.home.name} (${m.home.shortName}, ${countryName(m.home.country)}) ${m.home.countryFlag}`);
+  lines.push(`- Đội khách: ${m.away.name} (${m.away.shortName}, ${countryName(m.away.country)}) ${m.away.countryFlag}`);
+  lines.push(`- Trạng thái: ${m.status === "completed" ? "Đã kết thúc" : m.status === "live" ? "Đang diễn ra" : "Chưa diễn ra"}`);
+  if (m.finalScore) {
+    lines.push(`- Tỉ số chung cuộc: ${m.finalScore.side1}-${m.finalScore.side2}`);
+  }
+  if (m.halftimeScore) {
+    lines.push(`- Tỉ số hiệp 1: ${m.halftimeScore.side1}-${m.halftimeScore.side2}`);
+  }
+  if (m.outcome && m.outcome !== "normal") {
+    lines.push(`- Kết thúc: ${m.outcome === "aet" ? "sau hiệp phụ" : m.outcome === "pen" ? "trên chấm luân lưu" : m.outcome}`);
+  }
+  if (winner) {
+    lines.push(`- Đội thắng: ${winnerName}`);
+  }
+  if (m.events && m.events.goals.length > 0) {
+    const goalLines = m.events.goals.map((g) => {
+      const sideName = g.side === "home" ? m.home.name : m.away.name;
+      const min = g.stoppage ? `${g.minute}+${g.stoppage}` : `${g.minute}`;
+      const tag = g.isPenalty ? " (phạt đền)" : g.isOwnGoal ? " (phản lưới)" : "";
+      const assist = g.assist ? `, kiến tạo: ${g.assist}` : "";
+      return `Phút ${min}' ${sideName}: ${g.scorer}${tag}${assist}`;
+    });
+    lines.push(`- Bàn thắng (${m.events.goals.length}): ${goalLines.join("; ")}`);
+  }
+  if (m.events && m.events.cards.length > 0) {
+    const cardLines = m.events.cards.map((c) => {
+      const sideName = c.side === "home" ? m.home.name : m.away.name;
+      const min = c.stoppage ? `${c.minute}+${c.stoppage}` : `${c.minute}`;
+      const colorLabel = c.color === "yellow" ? "vàng" : c.color === "red" ? "đỏ" : "vàng thứ 2";
+      return `${min}' ${sideName} ${c.player} (${colorLabel})`;
+    });
+    lines.push(`- Thẻ phạt (${m.events.cards.length}): ${cardLines.join("; ")}`);
+  }
+  if (m.events && m.events.subs.length > 0) {
+    const subLines = m.events.subs.map(
+      (s) =>
+        `${s.minute}' ${s.side === "home" ? m.home.name : m.away.name}: ${s.playerOut} → ${s.playerIn}`,
+    );
+    lines.push(`- Thay người (${m.events.subs.length}): ${subLines.join("; ")}`);
+  }
+  if (m.stats) {
+    const s = m.stats;
+    const parts: string[] = [];
+    if (s.possession) parts.push(`kiểm soát bóng ${s.possession.home}-${s.possession.away}%`);
+    if (s.shots) parts.push(`sút ${s.shots.home}-${s.shots.away}`);
+    if (s.shotsOnTarget) parts.push(`sút trúng đích ${s.shotsOnTarget.home}-${s.shotsOnTarget.away}`);
+    if (s.fouls) parts.push(`phạm lỗi ${s.fouls.home}-${s.fouls.away}`);
+    if (s.corners) parts.push(`phạt góc ${s.corners.home}-${s.corners.away}`);
+    if (s.yellowCards) parts.push(`thẻ vàng ${s.yellowCards.home}-${s.yellowCards.away}`);
+    if (s.redCards) parts.push(`thẻ đỏ ${s.redCards.home}-${s.redCards.away}`);
+    if (s.offsides) parts.push(`việt vị ${s.offsides.home}-${s.offsides.away}`);
+    if (parts.length > 0) {
+      lines.push(`- Thống kê: ${parts.join(", ")}`);
+    }
   }
   return lines.join("\n");
 }
