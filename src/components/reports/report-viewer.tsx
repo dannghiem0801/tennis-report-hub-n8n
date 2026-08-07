@@ -115,7 +115,7 @@ export function ReportViewer({ matchId, onClose }: ReportViewerProps) {
             </span>
             <span>
               <FileText className="mr-1 inline h-3 w-3" />
-              {formatFinalScore(match.sets)}
+              {formatFinalScore(match)}
             </span>
           </DialogDescription>
         </DialogHeader>
@@ -171,7 +171,7 @@ export function ReportViewer({ matchId, onClose }: ReportViewerProps) {
 
           {/* Point-by-point tabbed viewer — only when we have PBP data
               (match was added to the watchlist and PBP fetch succeeded). */}
-          {!isPrompt && match.pointByPoint && match.pointByPoint.sets.length > 0 && (
+          {!isPrompt && (match as TennisMatch).pointByPoint && (match as TennisMatch).pointByPoint.sets.length > 0 && (
             <PointByPointViewer match={match} />
           )}
         </div>

@@ -18,10 +18,10 @@
 import * as React from "react";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { cn } from "@/lib/utils";
-import type { Match, PointByPointData, PointByPointGame, PointByPointSet } from "@/types";
+import type { Match, PointByPointData, PointByPointGame, PointByPointSet, TennisMatch } from "@/types";
 
 export function PointByPointViewer({ match }: { match: Match }) {
-  const pbp = match.pointByPoint;
+  const pbp: PointByPointData | undefined = (match as TennisMatch).pointByPoint;
   if (!pbp || pbp.sets.length === 0) return null;
 
   return (
@@ -37,7 +37,7 @@ export function PointByPointViewer({ match }: { match: Match }) {
 
       <Tabs defaultValue="set-0" className="w-full">
         <TabsList className="w-full justify-start gap-0 rounded-b-none border-b border-slate-800 bg-transparent p-0">
-          {pbp.sets.map((set, i) => (
+          {pbp.sets.map((set: PointByPointSet, i: number) => (
             <TabsTrigger
               key={i}
               value={`set-${i}`}
@@ -48,7 +48,7 @@ export function PointByPointViewer({ match }: { match: Match }) {
           ))}
         </TabsList>
 
-        {pbp.sets.map((set, i) => (
+        {pbp.sets.map((set: PointByPointSet, i: number) => (
           <TabsContent key={i} value={`set-${i}`} className="mt-0">
             <SetView
               set={set}
@@ -82,7 +82,7 @@ function SetView({
       </div>
 
       <div>
-        {set.games.map((game, i) => (
+        {set.games.map((game: any, i: number) => (
           <GameRow key={i} game={game} setNumber={set.setNumber} />
         ))}
       </div>
@@ -248,7 +248,7 @@ function PointSequence({ seq }: { seq: string }) {
   if (segments.length === 0) return null;
   return (
     <div className="flex max-w-full flex-wrap items-center justify-center gap-x-1.5 gap-y-1 font-mono text-[10.5px] text-slate-400">
-      {segments.map((seg, i) => (
+      {segments.map((seg: any, i: number) => (
         <React.Fragment key={i}>
           <span>{seg.text}</span>
           {seg.marker && (
@@ -276,16 +276,17 @@ function PointSequence({ seq }: { seq: string }) {
 /*  Final banner (sets won, shown at end of last set)                  */
 /* ------------------------------------------------------------------ */
 
-function FinalBanner({ match }: { match: Match }) {
-  const setsWon = match.setsWon;
-  const p1Sets = setsWon?.player1 ?? 0;
-  const p2Sets = setsWon?.player2 ?? 0;
-  const p1Initial = (match.player1.fullName || "?").trim().charAt(0).toUpperCase() || "?";
-  const p2Initial = (match.player2.fullName || "?").trim().charAt(0).toUpperCase() || "?";
+function FinalBanner({ match }: { match: TennisMatch }) {
+  // use destructuring to access side1/side2
+  const { side1: setsWonSide1, side2: setsWonSide2 } = (match as TennisMatch).setsWon || {};
+  const p1Sets: number = setsWonSide1 ?? 0;
+  const p2Sets: number = setsWonSide2 ?? 0;
+  const p1Initial = ((match as TennisMatch).player1.fullName || "?").trim().charAt(0).toUpperCase() || "?";
+  const p2Initial = ((match as TennisMatch).player2.fullName || "?").trim().charAt(0).toUpperCase() || "?";
 
   return (
     <div className="flex items-center justify-center gap-6 border-t border-slate-800 bg-slate-900/30 px-4 py-5">
-      <PlayerAvatar initial={p1Initial} flag={match.player1.countryFlag} side="left" />
+      <PlayerAvatar initial={p1Initial} flag={(match as TennisMatch).player1.countryFlag} side="left" />
       <div className="flex flex-col items-center">
         <div className="font-mono text-3xl font-bold leading-none text-slate-100">
           {p1Sets}-{p2Sets}
@@ -294,7 +295,7 @@ function FinalBanner({ match }: { match: Match }) {
           Finished
         </div>
       </div>
-      <PlayerAvatar initial={p2Initial} flag={match.player2.countryFlag} side="right" />
+      <PlayerAvatar initial={p2Initial} flag={(match as TennisMatch).player2.countryFlag} side="right" />
     </div>
   );
 }

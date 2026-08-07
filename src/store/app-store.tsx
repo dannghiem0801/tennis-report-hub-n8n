@@ -7,12 +7,17 @@ import type {
   ReportTemplate,
   ScheduledBatch,
   Settings,
+  Sport,
+  TennisMatch,
   Tournament,
   WatchlistEntry,
   WatchlistStatus,
 } from "@/types";
 import { storage } from "./persistence";
-import { DEFAULT_TEMPLATES, migrateBundledTemplates } from "@/reports/templates";
+import {
+  DEFAULT_TEMPLATES_BY_SPORT,
+  migrateBundledTemplates,
+} from "@/reports/templates";
 import { migrateLLMConfig } from "@/api/llm";
 import { generateReport, getMatchWinner, getFinalScore } from "@/reports/generate";
 import { formatDateKey, formatTime, parseDateKey, uid, APP_TIMEZONE } from "@/lib/utils";
@@ -25,6 +30,32 @@ import {
   setRateLimitedListener,
 } from "@/api/flashscore";
 import { mapMatchesBatch, mapMatchDetails, mapPointByPoint } from "@/api/flashscore-mapper";
+
+/**
+ * Map `Sport` (UI enum) to the upstream `sportId` (RapidAPI flashscore4).
+ * Source: `/get-sports` endpoint, verified at code time.
+ * - 1 = Football
+ * - 2 = Tennis
+ * - 3 = Basketball (deferred — UI hides this tab)
+ */
+const SPORT_ID_MAP: Record<Sport, number> = {
+  tennis: 2,
+  football: 1,
+  basketball: 3,
+};
+
+/**
+ * Display label for an empty-dashboard error message, sport-aware.
+ */
+function emptyKeyErrorMessage(sport: Sport): string {
+  if (sport === "tennis") {
+    return "Chưa cấu hình Tennis API key. Vào Settings để nhập key và bắt đầu xem dữ liệu thật.";
+  }
+  if (sport === "football") {
+    return "Chưa cấu hình Sports API key. Vào Settings để nhập key và bắt đầu xem dữ liệu bóng đá.";
+  }
+  return "Chưa cấu hình API key. Vào Settings để nhập key.";
+}
 
 interface AppState {
   // data
@@ -57,6 +88,7 @@ interface AppState {
 
   // actions
   setSelectedDate: (key: string) => void;
+  setActiveSport: (sport: Sport) => void;
   refreshMatches: () => Promise<void>;
   toggleWatchlist: (match: Match) => void;
   /** Explicit add (idempotent). Returns the entry id, or null if the
@@ -170,20 +202,24 @@ async function fetchAndCacheMatchData(
 }
 
 export function AppProvider({ children }: { children: ReactNode }) {
-  // user data
-  const [watchlist, setWatchlist] = useState<WatchlistEntry[]>(() => storage.getWatchlist());
-  const [reports, setReports] = useState<Report[]>(() => storage.getReports());
+  // Active sport (single key, persisted). Initial value from localStorage.
+  const [activeSport, setActiveSportInternal] = useState<Sport>(() => storage.getActiveSport());
+
+  // user data — per-sport, loaded for the active sport.
+  const [watchlist, setWatchlist] = useState<WatchlistEntry[]>(() => storage.getWatchlist(activeSport));
+  const [reports, setReports] = useState<Report[]>(() => storage.getReports(activeSport));
   const [templates, setTemplates] = useState<ReportTemplate[]>(() => {
-    const saved = storage.getTemplates();
+    const saved = storage.getTemplates(activeSport);
     if (saved.length > 0) {
       // Migrate any stale bundled copies (e.g. older tpl-prompt) to the
       // current bundled content. User-created templates are preserved.
       const migrated = migrateBundledTemplates(saved);
-      if (migrated !== saved) storage.setTemplates(migrated);
+      if (migrated !== saved) storage.setTemplates(activeSport, migrated);
       return migrated;
     }
-    storage.setTemplates(DEFAULT_TEMPLATES);
-    return DEFAULT_TEMPLATES;
+    const bundled = DEFAULT_TEMPLATES_BY_SPORT[activeSport] ?? [];
+    storage.setTemplates(activeSport, bundled);
+    return bundled;
   });
   const [settings, setSettings] = useState<Settings>(() => {
     const saved = storage.getSettings();
@@ -194,10 +230,36 @@ export function AppProvider({ children }: { children: ReactNode }) {
     // the new default. The user can switch back via Settings.
     return { ...saved, llm: migrateLLMConfig(saved.llm) };
   });
-  const [seenReportIds, setSeenReportIds] = useState<string[]>(() => storage.getSeenReportIds());
+  const [seenReportIds, setSeenReportIds] = useState<string[]>(() => storage.getSeenReportIds(activeSport));
   const [scheduledBatches, setScheduledBatches] = useState<ScheduledBatch[]>(() =>
-    storage.getScheduledBatches()
+    storage.getScheduledBatches(activeSport)
   );
+
+  /**
+   * Switch active sport. Persists to localStorage, reloads per-sport
+   * data, clears in-flight matches, and triggers a refetch.
+   */
+  const setActiveSport = useCallback((sport: Sport) => {
+    setActiveSportInternal((current) => {
+      if (current === sport) return current;
+      storage.setActiveSport(sport);
+      setWatchlist(storage.getWatchlist(sport));
+      setReports(storage.getReports(sport));
+      setSeenReportIds(storage.getSeenReportIds(sport));
+      setScheduledBatches(storage.getScheduledBatches(sport));
+      const tpl = storage.getTemplates(sport);
+      if (tpl.length > 0) {
+        setTemplates(tpl);
+      } else {
+        const bundled = DEFAULT_TEMPLATES_BY_SPORT[sport] ?? [];
+        storage.setTemplates(sport, bundled);
+        setTemplates(bundled);
+      }
+      setMatches([]);
+      setTournaments([]);
+      return sport;
+    });
+  }, []);
 
   // matches
   const [selectedDate, setSelectedDateInternal] = useState<string>(() => formatDateKey(new Date()));
@@ -224,13 +286,13 @@ export function AppProvider({ children }: { children: ReactNode }) {
   const [isDateAutoPicked, setIsDateAutoPicked] = useState(false);
   const [userSelectedDate, setUserSelectedDate] = useState<string>(() => formatDateKey(new Date()));
 
-  // persist
-  useEffect(() => storage.setWatchlist(watchlist), [watchlist]);
-  useEffect(() => storage.setReports(reports), [reports]);
-  useEffect(() => storage.setTemplates(templates), [templates]);
+  // persist (per-sport for entity data; settings is shared)
+  useEffect(() => storage.setWatchlist(activeSport, watchlist), [watchlist, activeSport]);
+  useEffect(() => storage.setReports(activeSport, reports), [reports, activeSport]);
+  useEffect(() => storage.setTemplates(activeSport, templates), [templates, activeSport]);
   useEffect(() => storage.setSettings(settings), [settings]);
-  useEffect(() => storage.setSeenReportIds(seenReportIds), [seenReportIds]);
-  useEffect(() => storage.setScheduledBatches(scheduledBatches), [scheduledBatches]);
+  useEffect(() => storage.setSeenReportIds(activeSport, seenReportIds), [seenReportIds, activeSport]);
+  useEffect(() => storage.setScheduledBatches(activeSport, scheduledBatches), [scheduledBatches, activeSport]);
 
   // fetch matches
   // Use a ref to read current matches length without re-creating this callback
@@ -272,7 +334,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
           setTournaments([]);
           setIsUsingLiveData(false);
           setLastFetchedAt(null);
-          setMatchError("Chưa cấu hình Tennis API key. Vào Settings để nhập key và bắt đầu xem dữ liệu thật.");
+          setMatchError(emptyKeyErrorMessage(activeSport));
           return;
         }
 
@@ -283,7 +345,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
         // Cached 30 min, in-flight deduped inside flashscore.ts.
         const payload = await getMatchesByDate({
           apiKey,
-          sportId: 2, // tennis
+          sportId: SPORT_ID_MAP[activeSport],
           date: dateKey,
           timezone: APP_TIMEZONE,
         });
@@ -329,7 +391,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
             try {
               const fallbackPayload = await getMatchesByDate({
                 apiKey,
-                sportId: 2,
+                sportId: SPORT_ID_MAP[activeSport],
                 date: key,
                 timezone: APP_TIMEZONE,
               });
@@ -376,7 +438,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
 
     inFlightFetchRef.current.set(dateKey, work);
     return work;
-  }, [settings.rapidApiKey, rateLimitUntil]);
+  }, [settings.rapidApiKey, rateLimitUntil, activeSport]);
 
   // initial fetch
   useEffect(() => {
@@ -400,7 +462,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
         try {
           const payload = await getMatchesByDate({
             apiKey: settings.rapidApiKey,
-            sportId: 2,
+            sportId: SPORT_ID_MAP[activeSport],
             date: key,
             timezone: APP_TIMEZONE,
           });
@@ -417,7 +479,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
       }
       return null;
     },
-    [settings.rapidApiKey, selectedDate]
+    [settings.rapidApiKey, selectedDate, activeSport]
   );
 
   const clearAutoPick = useCallback(() => setIsDateAutoPicked(false), []);
@@ -487,15 +549,18 @@ export function AppProvider({ children }: { children: ReactNode }) {
     if (!settings.rapidApiKey?.trim()) return;
     const apiKey = settings.rapidApiKey.trim();
     const watchlistIds = new Set(watchlist.map((e) => e.matchApiId));
-    const needsEnrich = matches.filter(
-      (m) =>
-        watchlistIds.has(m.id) &&
-        m.status === "completed" &&
-        // Trigger if EITHER sets OR PBP is missing — the helper
-        // patches whichever it can fetch.
-        (!m.sets || m.sets.length === 0 || !m.pointByPoint) &&
-        !enrichRequestedRef.current.has(m.id)
-    );
+    const needsEnrich = matches.filter((m) => {
+      if (!watchlistIds.has(m.id)) return false;
+      if (m.status !== "completed") return false;
+      // Sport-aware: tennis needs sets + PBP. Football v1.5 MVP
+      // doesn't enrich (events come from list-by-date).
+      if (m.sport === "tennis") {
+        const t = m as TennisMatch;
+        return (!t.sets || t.sets.length === 0 || !m.pointByPoint) &&
+          !enrichRequestedRef.current.has(m.id);
+      }
+      return false; // football: no enrich in v1.5
+    });
     for (const m of needsEnrich) {
       enrichRequestedRef.current.add(m.id);
       void fetchAndCacheMatchData(m.id, apiKey, enrichRequestedRef, setMatches);
@@ -631,15 +696,15 @@ export function AppProvider({ children }: { children: ReactNode }) {
         // effect. We re-check here in case the cache was cleared or the
         // match transitioned to completed between sessions.
         let matchWithPBP = match;
-        if (
-          match.status === "completed" &&
-          (!match.sets || match.sets.length === 0 || !match.pointByPoint) &&
-          settings.rapidApiKey?.trim()
-        ) {
+        // Sport dispatch (ADR 0002): tennis enriches with PBP; football
+        // v1.5 MVP doesn't enrich (events come from list-by-date).
+        const needsTennisEnrich = match.sport === "tennis" && (
+          !(match as TennisMatch).sets || (match as TennisMatch).sets!.length === 0 || !match.pointByPoint
+        );
+        if (match.status === "completed" && needsTennisEnrich && settings.rapidApiKey?.trim()) {
           transition("fetching-pbp");
           try {
             const apiKey = settings.rapidApiKey.trim();
-            // Run both calls in parallel; partial success is fine.
             const [detailsResult, pbpResult] = await Promise.allSettled([
               getMatchDetails({ apiKey, matchId: match.id }).then(mapMatchDetails),
               getPointByPoint({ apiKey, matchId: match.id }).then(mapPointByPoint),
@@ -660,19 +725,17 @@ export function AppProvider({ children }: { children: ReactNode }) {
             if (Object.keys(patch).length > 0) {
               matchWithPBP = { ...match, ...patch };
               setMatches((current) =>
-                current.map((m) => (m.id === match.id ? { ...m, ...patch } : m))
+                current.map((m) => (m.id === match.id ? ({ ...m, ...patch } as Match) : m))
               );
             }
 
             if (detailsResult.status === "rejected") {
-              // eslint-disable-next-line no-console
               console.warn(
                 `[pipeline ${entry.id}] details fetch failed (will continue without):`,
                 detailsResult.reason,
               );
             }
             if (pbpResult.status === "rejected") {
-              // eslint-disable-next-line no-console
               console.warn(
                 `[pipeline ${entry.id}] PBP fetch failed (will continue without):`,
                 pbpResult.reason,
@@ -718,10 +781,18 @@ export function AppProvider({ children }: { children: ReactNode }) {
 
         // ─── Step 5: finalize ───────────────────────────────────────
         const winner = getMatchWinner(matchWithPBP);
-        const winnerName = winner === 1 ? matchWithPBP.player1.fullName : matchWithPBP.player2.fullName;
+        const winnerName = matchWithPBP.sport === "tennis"
+          ? (winner === 1
+              ? (matchWithPBP as TennisMatch).player1.fullName
+              : (matchWithPBP as TennisMatch).player2.fullName)
+          : matchWithPBP.sport === "football"
+          ? (winner === 1
+              ? (matchWithPBP as { home: { name: string } }).home.name
+              : (matchWithPBP as { away: { name: string } }).away.name)
+          : "—";
         setReports((r) => [report, ...r]);
         transition("completed", {
-          finalScore: getFinalScore(matchWithPBP.sets || []),
+          finalScore: getFinalScore(matchWithPBP),
           winner: winnerName,
         });
       } catch (err) {
@@ -753,13 +824,37 @@ export function AppProvider({ children }: { children: ReactNode }) {
         if (exists) {
           return current.filter((w) => w.id !== exists.id);
         }
+        // Sport-aware side names. Tennis uses player1/player2.fullName;
+        // football uses home/away.name. The `side1Name` field on the
+        // entry is generic — both shapes are valid.
+        const side1Name = match.sport === "tennis"
+          ? (match as TennisMatch).player1.fullName
+          : match.sport === "football"
+          ? (match as { home: { name: string } }).home.name
+          : "—";
+        const side2Name = match.sport === "tennis"
+          ? (match as TennisMatch).player2.fullName
+          : match.sport === "football"
+          ? (match as { away: { name: string } }).away.name
+          : "—";
+        const side1Flag = match.sport === "tennis"
+          ? (match as TennisMatch).player1.countryFlag
+          : match.sport === "football"
+          ? (match as { home: { countryFlag: string } }).home.countryFlag
+          : "";
+        const side2Flag = match.sport === "tennis"
+          ? (match as TennisMatch).player2.countryFlag
+          : match.sport === "football"
+          ? (match as { away: { countryFlag: string } }).away.countryFlag
+          : "";
         const entry: WatchlistEntry = {
           id: uid(),
+          sport: match.sport,
           matchApiId: match.id,
-          player1Name: match.player1.fullName,
-          player2Name: match.player2.fullName,
-          player1Flag: match.player1.countryFlag,
-          player2Flag: match.player2.countryFlag,
+          side1Name,
+          side2Name,
+          side1Flag,
+          side2Flag,
           tournamentName: match.tournamentName,
           tournamentCategory: match.tournamentCategory,
           matchDate: selectedDate,
@@ -812,13 +907,15 @@ export function AppProvider({ children }: { children: ReactNode }) {
         isNewlyAdded = true;
         return [entry, ...current];
       });
-      // Trigger 2: if the match is already completed and was just added to
-      // the watchlist, fire the enrich fetch immediately. (For live/scheduled
-      // matches, the useEffect above will catch the transition later.)
+      // Trigger 2: sport-aware enrich (tennis only for v1.5).
+      const tennisMatch2 = match.sport === "tennis" ? (match as TennisMatch) : null;
+      const needsTennisEnrich = tennisMatch2
+        ? !tennisMatch2.sets || tennisMatch2.sets.length === 0 || !(match as TennisMatch).pointByPoint
+        : false;
       if (
         isNewlyAdded &&
         match.status === "completed" &&
-        (!match.sets || match.sets.length === 0 || !match.pointByPoint) &&
+        needsTennisEnrich &&
         settings.rapidApiKey?.trim() &&
         !enrichRequestedRef.current.has(match.id)
       ) {
@@ -881,7 +978,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
       const today = formatDateKey(new Date());
       const res = await getMatchesByDate({
         apiKey,
-        sportId: 2,
+        sportId: SPORT_ID_MAP[activeSport],
         date: today,
         timezone: settings.timezone || "Asia/Ho_Chi_Minh",
       });
@@ -1235,6 +1332,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
 
   const value = useMemo<AppState>(
     () => ({
+      activeSport,
       selectedDate,
       userSelectedDate,
       matches,
@@ -1255,6 +1353,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
       isWatchlisted,
       getReportByMatch,
       setSelectedDate,
+      setActiveSport,
       refreshMatches,
       toggleWatchlist,
       addToWatchlist,
@@ -1280,6 +1379,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
       hasRunningBatch,
     }),
     [
+      activeSport,
       selectedDate,
       userSelectedDate,
       matches,
@@ -1300,6 +1400,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
       isWatchlisted,
       getReportByMatch,
       setSelectedDate,
+      setActiveSport,
       refreshMatches,
       toggleWatchlist,
       addToWatchlist,

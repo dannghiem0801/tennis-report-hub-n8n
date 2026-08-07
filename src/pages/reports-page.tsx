@@ -171,7 +171,7 @@ export function ReportsPage() {
                     </span>
                     <span>•</span>
                     <span className="font-mono text-slate-400">
-                      {formatFinalScore(match.sets)}
+                      {formatFinalScore(match)}
                     </span>
                     <span>•</span>
                     <span className="truncate">{match.player1.name} vs {match.player2.name}</span>

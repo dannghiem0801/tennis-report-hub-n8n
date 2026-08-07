@@ -68,16 +68,24 @@
 
 import type {
   Match,
-  MatchStats,
   MatchStatus,
-  Player,
+  Participant,
   PointByPointData,
   PointByPointGame,
+  ScoreLine,
   SetScore,
+  TennisMatch,
+  TennisMatchStats,
   Tournament,
   TournamentCategory,
 } from "@/types";
 import { flagFromAlpha2 } from "./country-flags";
+
+/** Local alias for the tennis player shape. */
+type Player = Extract<Participant, { kind: "player" }>;
+
+/** Local alias — TennisMatchStats is the new name (was MatchStats). */
+type MatchStats = TennisMatchStats;
 
 /* ------------------------------------------------------------------ */
 /*  Field extractors                                                   */
@@ -572,7 +580,7 @@ export function mapMatchesBatch({
 /*  Expected output:                                                */
 /*    {                                                              */
 /*      sets: SetScore[] | undefined,                                */
-/*      stats: MatchStats | undefined,                              */
+/*      stats: TennisMatchStats | undefined,                              */
 /*      winner: 1 | 2 | undefined,                                    */
 /*      finalScore: string | undefined,                              */
 /*      matchDurationMinutes: number | undefined,                    */
@@ -586,7 +594,7 @@ export interface MappedMatchDetails {
   /** Per-set game scores (e.g. [{p1:6,p2:4}, {p1:3,p2:6}, {p1:6,p2:3}]). */
   sets?: SetScore[];
   /** Match statistics (aces, double faults, first serve %, etc.). */
-  stats?: MatchStats;
+  stats?: TennisMatchStats;
   /** 1 if player1 won, 2 if player2 won. */
   winner?: 1 | 2;
   /** Human-readable final score string, e.g. "6-4, 3-6, 6-3". */
@@ -930,7 +938,7 @@ export function mapMatchDetails(payload: unknown): MappedMatchDetails {
     extractField<unknown>(obj, ["statistics", "stats", "match_stats", "matchStats"]);
   if (statsRaw && typeof statsRaw === "object") {
     const s = statsRaw as Record<string, unknown>;
-    const stats: MatchStats = {
+    const stats: TennisMatchStats = {
       aces: {
         player1: extractFirstNumber(s, ["aces.home", "aces.player1", "aces.p1", "home_aces"]) ?? 0,
         player2: extractFirstNumber(s, ["aces.away", "aces.player2", "aces.p2", "away_aces"]) ?? 0,

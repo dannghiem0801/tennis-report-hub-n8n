@@ -38,9 +38,14 @@ export function MatchRow({ match, compact: _compact, onOpenReport, onOpenSchedul
   };
 
   // Winner: most sets won
-  const sets = match.sets || [];
-  const p1SetsWon = match.setsWon?.player1 ?? sets.filter((s) => s.player1 > s.player2).length;
-  const p2SetsWon = match.setsWon?.player2 ?? sets.filter((s) => s.player2 > s.player1).length;
+  // v1.5 MVP: this component is tennis-only. Football matches
+  // (match.sport === "football") need a separate MatchRow variant
+  // because the score shape is goals, not sets.
+  const tennisMatch = match as TennisMatch;
+  const sets = tennisMatch.sets || [];
+  const setsWon = tennisMatch.setsWon as { side1: number; side2: number } | undefined;
+  const p1SetsWon = setsWon?.side1 ?? sets.filter((s: SetScore) => s.player1 > s.player2).length;
+  const p2SetsWon = setsWon?.side2 ?? sets.filter((s: SetScore) => s.player2 > s.player1).length;
   const p1Won = match.status === "completed" && p1SetsWon > p2SetsWon;
   const p2Won = match.status === "completed" && p2SetsWon > p1SetsWon;
   const isLive = match.status === "live";
@@ -99,30 +104,30 @@ export function MatchRow({ match, compact: _compact, onOpenReport, onOpenSchedul
       {/* Players + score */}
       <div className="flex flex-col gap-1 min-w-0">
         <PlayerScoreRow
-          flag={match.player1.countryFlag}
-          country={match.player1.country}
-          name={match.player1.fullName || match.player1.name}
-          rank={match.player1.ranking}
-          seed={match.player1.seed}
+          flag={tennisMatch.player1.countryFlag}
+          country={tennisMatch.player1.country}
+          name={tennisMatch.player1.fullName || tennisMatch.player1.name}
+          rank={tennisMatch.player1.ranking}
+          seed={tennisMatch.player1.seed}
           setsWon={p1SetsWon}
           sets={sets}
           isLive={isLive}
           isPlayer1={true}
           isWinner={p1Won}
-          currentSetScore={match.currentSetScore}
+          currentSetScore={tennisMatch.currentSetScore}
         />
         <PlayerScoreRow
-          flag={match.player2.countryFlag}
-          country={match.player2.country}
-          name={match.player2.fullName || match.player2.name}
-          rank={match.player2.ranking}
-          seed={match.player2.seed}
+          flag={tennisMatch.player2.countryFlag}
+          country={tennisMatch.player2.country}
+          name={tennisMatch.player2.fullName || tennisMatch.player2.name}
+          rank={tennisMatch.player2.ranking}
+          seed={tennisMatch.player2.seed}
           setsWon={p2SetsWon}
           sets={sets}
           isLive={isLive}
           isPlayer1={false}
           isWinner={p2Won}
-          currentSetScore={match.currentSetScore}
+          currentSetScore={tennisMatch.currentSetScore}
         />
       </div>
 
