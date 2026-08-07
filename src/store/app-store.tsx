@@ -974,7 +974,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
       // additional enrich (events come from list-by-date, not /details).
       const tennisMatch = match.sport === "tennis" ? (match as TennisMatch) : null;
       const needsTennisEnrich = tennisMatch
-        ? !tennisMatch.sets || tennisMatch.sets.length === 0 || !match.pointByPoint
+        ? !tennisMatch.sets || tennisMatch.sets.length === 0 || !(match as TennisMatch).pointByPoint
         : false;
       if (
         isNewlyAdded &&

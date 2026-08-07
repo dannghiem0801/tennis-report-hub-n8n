@@ -1,3 +1,4 @@
+// NOISE LINE
 import type { FootballMatch, Match, SetScore, TennisMatch } from "@/types";
 
 /**
@@ -9,7 +10,7 @@ import type { FootballMatch, Match, SetScore, TennisMatch } from "@/types";
  *   - tennis → "6-4, 3-6, 6-3" (per-set games)
  *   - football → "2-1" (final score line)
  */
-export function formatFinalScore(input: Match | Match["sets"]): string {
+export function formatFinalScore(input: Match | (TennisMatch["sets"] | undefined)): string {
   // Legacy overload: sets array (tennis)
   if (Array.isArray(input)) {
     return formatTennisSets(input as TennisMatch["sets"]);

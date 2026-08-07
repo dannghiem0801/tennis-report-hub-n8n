@@ -337,8 +337,7 @@ function buildGoalNarrative(match: FootballMatch, winner: 1 | 2 | null): string 
       );
     } else {
       const prev = events.goals[i - 1];
-      const prevSide = prev.side === "home" ? homeName : awayName;
-      const isEqualizer = goal.side !== prev.side;
+      const isEqualizer = goal.side !== (prev as { side: "home" | "away" }).side;
       const isLeadChange = isEqualizer && match.finalScore;
       const goalSoFar = events.goals.slice(0, i + 1);
       const homeGoalsSoFar = goalSoFar.filter((g) => g.side === "home").length;
@@ -586,7 +585,7 @@ export function formatFullScore(sets: TennisMatch["sets"]): string;
 export function formatFullScore(match: Match): string;
 export function formatFullScore(input: TennisMatch["sets"] | Match): string {
   if (Array.isArray(input)) return formatTennisFullScore(input as TennisMatch["sets"]);
-  if (input.sport === "football") return formatFootballScore(input);
+  if (input && input.sport === "football") return formatFootballScore(input as FootballMatch);
   return formatTennisFullScore((input as TennisMatch).sets);
 }
 
@@ -606,8 +605,9 @@ export function getMatchLoser(winner: 1 | 2 | null): 1 | 2 | null {
 export function getFinalScore(sets: TennisMatch["sets"]): string;
 export function getFinalScore(match: Match): string;
 export function getFinalScore(input: TennisMatch["sets"] | Match): string {
+  if (input == null) return "";
   if (Array.isArray(input)) return formatTennisFullScore(input as TennisMatch["sets"]);
-  if (input.sport === "football") return formatFootballScore(input);
+  if (input && input.sport === "football") return formatFootballScore(input as FootballMatch);
   return formatTennisFullScore((input as TennisMatch).sets);
 }
 
