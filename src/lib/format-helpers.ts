@@ -1,4 +1,4 @@
-import type { Match, SetScore, TennisMatch } from "@/types";
+import type { FootballMatch, Match, SetScore, TennisMatch } from "@/types";
 
 /**
  * Format the final score of a tennis match as a comma-separated list
@@ -15,11 +15,13 @@ export function formatFinalScore(input: Match | Match["sets"]): string {
     return formatTennisSets(input as TennisMatch["sets"]);
   }
   // Match (discriminated union)
-  if (input.sport === "football") {
-    if (!input.finalScore) return "";
-    return `${input.finalScore.side1}-${input.finalScore.side2}`;
+  const match = input as Match;
+  if (match.sport === "football") {
+    const fm = match as FootballMatch;
+    if (!fm.finalScore) return "";
+    return `${fm.finalScore.side1}-${fm.finalScore.side2}`;
   }
-  return formatTennisSets((input as TennisMatch).sets);
+  return formatTennisSets((match as TennisMatch).sets);
 }
 
 function formatTennisSets(sets: TennisMatch["sets"]): string {

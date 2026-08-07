@@ -1,8 +1,6 @@
 import type {
-  FootballEvents,
   FootballMatch,
   Match,
-  MatchOutcome,
   Report,
   ReportTemplate,
   Settings,

@@ -278,8 +278,8 @@ function PointSequence({ seq }: { seq: string }) {
 
 function FinalBanner({ match }: { match: TennisMatch }) {
   const setsWon = match.setsWon;
-  const p1Sets = setsWon?.player1 ?? 0;
-  const p2Sets = setsWon?.player2 ?? 0;
+  const p1Sets = setsWon?.side1 ?? 0;
+  const p2Sets = setsWon?.side2 ?? 0;
   const p1Initial = (match.player1.fullName || "?").trim().charAt(0).toUpperCase() || "?";
   const p2Initial = (match.player2.fullName || "?").trim().charAt(0).toUpperCase() || "?";
 

@@ -174,7 +174,7 @@ async function fetchAndCacheMatchData(
   apiKey: string,
   requestedRef: MutableRefObject<Set<string>>,
   setMatches: Dispatch<SetStateAction<Match[]>>,
-): Promise<{ sets?: Match["sets"]; pointByPoint?: Match["pointByPoint"]; stats?: Match["stats"] }> {
+): Promise<{ sets?: TennisMatch["sets"]; pointByPoint?: TennisMatch["pointByPoint"]; stats?: TennisMatch["stats"] }> {
   // Fire both calls in parallel. allSettled guarantees we get both
   // outcomes even if one rejects.
   const [detailsResult, pbpResult] = await Promise.allSettled([
@@ -203,7 +203,7 @@ async function fetchAndCacheMatchData(
 
   if (Object.keys(patch).length > 0) {
     setMatches((current) =>
-      current.map((m) => (m.id === matchId ? { ...m, ...patch } : m))
+      current.map((m) => (m.id === matchId ? ({ ...m, ...patch } as Match) : m))
     );
   }
 
@@ -728,7 +728,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
         //                football enriches via /details events + stats)
         let matchWithPBP: Match = match;
         const needsTennisEnrich = match.sport === "tennis" && (
-          !(match as TennisMatch).sets || (match as TennisMatch).sets!.length === 0 || !match.pointByPoint
+          !(match as TennisMatch).sets || (match as TennisMatch).sets!.length === 0 || !(match as TennisMatch).pointByPoint
         );
         const needsFootballEnrich = match.sport === "football" && false; // v1.5 MVP: football events not yet enriched; rely on list-by-date
         const needsEnrich = (needsTennisEnrich || needsFootballEnrich) && settings.rapidApiKey?.trim();
@@ -758,7 +758,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
               if (Object.keys(patch).length > 0) {
                 matchWithPBP = { ...match, ...patch };
                 setMatches((current) =>
-                  current.map((m) => (m.id === match.id ? { ...m, ...patch } : m))
+                  current.map((m) => (m.id === match.id ? ({ ...m, ...patch } as Match) : m))
                 );
               }
 
