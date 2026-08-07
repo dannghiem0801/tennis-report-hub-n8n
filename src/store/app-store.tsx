@@ -395,6 +395,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
         const { matches: mappedMatches, tournaments: mappedTournaments } = mapMatchesBatch({
           payload,
           dateKey,
+          sport: activeSport,
         });
 
         setMatches(mappedMatches);
@@ -417,11 +418,11 @@ export function AppProvider({ children }: { children: ReactNode }) {
             try {
               const fallbackPayload = await getMatchesByDate({
                 apiKey,
-                sportId: 2,
+                sportId: SPORT_ID_MAP[activeSport],
                 date: key,
                 timezone: APP_TIMEZONE,
               });
-              const fb = mapMatchesBatch({ payload: fallbackPayload, dateKey: key });
+              const fb = mapMatchesBatch({ payload: fallbackPayload, dateKey: key, sport: activeSport });
               if (fb.matches.length > 0) {
                 // eslint-disable-next-line no-console
                 console.log(
@@ -488,11 +489,11 @@ export function AppProvider({ children }: { children: ReactNode }) {
         try {
           const payload = await getMatchesByDate({
             apiKey: settings.rapidApiKey,
-            sportId: 2,
+            sportId: SPORT_ID_MAP[activeSport],
             date: key,
             timezone: APP_TIMEZONE,
           });
-          const { matches: foundMatches } = mapMatchesBatch({ payload, dateKey: key });
+          const { matches: foundMatches } = mapMatchesBatch({ payload, dateKey: key, sport: activeSport });
           if (foundMatches.length > 0) {
             // Switch to that date and mark as auto-picked
             setSelectedDateInternal(key);

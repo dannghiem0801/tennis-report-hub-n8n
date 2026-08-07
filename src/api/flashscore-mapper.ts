@@ -73,6 +73,7 @@ import type {
   PointByPointData,
   PointByPointGame,
   SetScore,
+  Sport,
   TennisMatchStats,
   Tournament,
   TournamentCategory,
@@ -233,6 +234,46 @@ function buildPlayerFromTeam(team: any): Player {
   };
 }
 
+/**
+ * Build a `Team` participant for football matches. Similar to
+ * `buildPlayerFromTeam` but emits `kind: "team"` and exposes `shortName`
+ * (used in compact UI like the match row's score badge). The mapper is
+ * v1.5 MVP-grade: it derives `shortName` from the team's `short_name`
+ * field if present, otherwise from the first 3 chars of the full name.
+ * v1.6 can refine this once we have real football samples to inspect.
+ */
+function buildTeamFromTeam(team: any): Extract<Participant, { kind: "team" }> {
+  if (!team || typeof team !== "object") {
+    return {
+      kind: "team" as const,
+      name: "TBD",
+      shortName: "TBD",
+      country: "",
+      countryFlag: "🏳️",
+    };
+  }
+  const fullName = String(
+    team?.name ?? team?.full_name ?? team?.Nm ?? "TBD"
+  ).trim() || "TBD";
+  const shortName = String(team?.short_name ?? team?.shortName ?? "").trim() ||
+    fullName.slice(0, 3).toUpperCase();
+  const flagUrl: string | undefined = team?.small_image_path ?? team?.image_path ?? team?.logo_path;
+  const alpha2 = extractCountryFromFlagUrl(flagUrl);
+  const country =
+    alpha2 ||
+    (typeof team?.country_name === "string" ? team.country_name.trim() : "") ||
+    "";
+  const countryFlag = alpha2 ? flagFromAlpha2(alpha2) : "🏳️";
+  return {
+    kind: "team" as const,
+    name: fullName,
+    shortName,
+    country,
+    countryFlag,
+    logoUrl: typeof team?.image_path === "string" ? team.image_path : undefined,
+  };
+}
+
 /* ------------------------------------------------------------------ */
 /*  Match status                                                       */
 /* ------------------------------------------------------------------ */
@@ -356,7 +397,8 @@ function buildMatch(
   raw: any,
   tournament: Tournament,
   dateKey: string,
-  index: number
+  index: number,
+  sport: Sport
 ): Match {
   const matchId = String(
     raw?.match_id ??
@@ -366,9 +408,6 @@ function buildMatch(
       raw?.Eid ??
       `unknown-${index}-${dateKey}`
   );
-
-  const player1 = buildPlayerFromTeam(raw?.home_team);
-  const player2 = buildPlayerFromTeam(raw?.away_team);
 
   const status = parseMatchStatus(raw?.match_status);
 
@@ -387,16 +426,16 @@ function buildMatch(
   const round =
     extractField<string>(raw, ["round", "round_name", "roundName"]) ?? "—";
 
-  // Sets won — from list-by-date's `scores: {home, away}` (the only set
-  // info the endpoint exposes; per-set game scores come from the
-  // /matches/details endpoint via mapMatchDetails). For completed matches
-  // these are final; for live matches they're the in-progress count.
+  // Scores — from list-by-date's `scores: {home, away}`. For tennis
+  // this is SETS won, for football this is FINAL GOALS. The same
+  // `scores` field works for both — only the semantic differs, which
+  // is why we branch below.
   const rawScores = extractField<{ home?: number; away?: number }>(raw, [
     "scores",
     "score",
     "result",
   ]);
-  const setsWon: { side1: number; side2: number } | undefined =
+  const finalScore: { side1: number; side2: number } | undefined =
     rawScores &&
     typeof rawScores === "object" &&
     (typeof rawScores.home === "number" || typeof rawScores.away === "number")
@@ -406,22 +445,66 @@ function buildMatch(
         }
       : undefined;
 
+  // Halftime score (football only — best effort from common path names).
+  const halftimeScore: { side1: number; side2: number } | undefined = (() => {
+    const raw = extractField<{ home?: number; away?: number }>(rawScores, [
+      "ht_score",
+      "halftime",
+      "half_time",
+    ]);
+    if (!raw || typeof raw !== "object") return undefined;
+    if (typeof raw.home !== "number" && typeof raw.away !== "number") return undefined;
+    return { side1: raw.home ?? 0, side2: raw.away ?? 0 };
+  })();
+
+  // Venue + referee (football). Best effort; many list-by-date payloads
+  // don't include these (they come from /matches/details). Leave
+  // undefined if not present — the UI handles missing values.
+  const venue = extractField<string>(raw, ["venue", "stadium", "ground"]);
+  const referee = extractField<string>(raw, ["referee", "referee_name"]);
+
+  if (sport === "football") {
+    const home = buildTeamFromTeam(raw?.home_team);
+    const away = buildTeamFromTeam(raw?.away_team);
+    return {
+      id: matchId,
+      sport: "football" as const,
+      tournamentId: tournament.id,
+      tournamentName: tournament.name,
+      tournamentCategory: tournament.category,
+      round,
+      startTime,
+      status,
+      finalScore,
+      halftimeScore,
+      venue,
+      referee,
+      home,
+      away,
+      // events + stats are NOT populated from list-by-date; the per-match
+      // /matches/details enrichment (mapMatchDetails) handles them.
+    };
+  }
+
+  // tennis (default)
+  const player1 = buildPlayerFromTeam(raw?.home_team);
+  const player2 = buildPlayerFromTeam(raw?.away_team);
   return {
     id: matchId,
-    sport: "tennis" as const, // v1.5 MVP: mapper is tennis-only
+    sport: "tennis" as const,
     tournamentId: tournament.id,
     tournamentName: tournament.name,
     tournamentCategory: tournament.category,
     round,
     startTime,
     status,
-    setsWon,
+    finalScore, // v1.5: keep using finalScore for tennis too (rename-friendly)
+    setsWon: finalScore, // legacy alias; tennis UI reads setsWon
     player1,
     player2,
     // NOTE: sets[] not populated from list-by-date endpoint — per-set game
-    // scores (6-4, 6-3) are not in this payload. The SetScore-level data
-    // (sets won) is in raw.scores but losing the per-set detail would be
-    // misleading. Report generator falls back to "0-2" format from raw.
+    // scores (6-4, 6-3) are not in this payload. Per-set detail comes
+    // from the /matches/details enrichment.
   };
 }
 
@@ -515,9 +598,11 @@ function findTournamentsArray(payload: unknown): any[] {
 export function mapMatchesBatch({
   payload,
   dateKey,
+  sport,
 }: {
   payload: unknown;
   dateKey: string;
+  sport: Sport;
 }): { matches: Match[]; tournaments: Tournament[] } {
   const tournamentsRaw = findTournamentsArray(payload);
 
@@ -547,7 +632,7 @@ export function mapMatchesBatch({
     const rawMatches = Array.isArray(t.matches) ? t.matches : [];
     for (const m of rawMatches) {
       if (!m || typeof m !== "object") continue;
-      matches.push(buildMatch(m, tInfo, dateKey, matchIndex++));
+      matches.push(buildMatch(m, tInfo, dateKey, matchIndex++, sport));
     }
   }
 
