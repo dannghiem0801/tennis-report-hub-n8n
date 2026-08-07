@@ -9,6 +9,7 @@ import type {
 import { buildPromptContext, getDefaultTemplate } from "./templates";
 import { uid } from "@/lib/utils";
 import { callLLM, LLMError } from "@/api/llm";
+import { fetchFootballSources, formatFootballSources } from "@/api/football-sources";
 
 /* ================================================================== */
 /*  Sport dispatchers                                                  */
@@ -665,7 +666,18 @@ export async function applyTemplate(
   llmConfig?: Settings["llm"]
 ): Promise<{ content: string; isPrompt: boolean; llmError?: string; llmModel?: string }> {
   if (template.kind === "prompt") {
-    const fullPrompt = `${template.content.trim()}\n${buildPromptContext(match)}\n`;
+    // Football prompt templates get a pre-fetched web-sources block
+    // appended to the prompt. The LLM synthesizes from the pre-fetched
+    // data instead of calling tools itself — MiniMax-M3 is unreliable
+    // at emitting proper Anthropic `tool_use` blocks (tends to output
+    // them as text), so the app does the Firecrawl search + scrape
+    // before the LLM call. Other sports are unchanged.
+    let webContext = "";
+    if (match.sport === "football") {
+      const sources = await fetchFootballSources(match as FootballMatch);
+      webContext = formatFootballSources(sources);
+    }
+    const fullPrompt = `${template.content.trim()}\n${buildPromptContext(match)}${webContext}\n`;
     if (llmConfig?.enabled && llmConfig.apiKey && llmConfig.model) {
       try {
         const result = await callLLM({ prompt: fullPrompt, config: llmConfig });
