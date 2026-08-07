@@ -72,7 +72,7 @@ export function DashboardPage() {
         />
       </div>
 
-      <div className="flex min-h-[600px] flex-col gap-3 lg:sticky lg:top-[88px] lg:h-[calc(100vh-100px)]">
+      <div className="order-first flex min-h-[600px] flex-col gap-3 lg:order-none lg:sticky lg:top-[88px] lg:h-[calc(100vh-100px)]">
         <WatchlistSidebar
           onOpenReport={setOpenMatchId}
           onOpenScheduleModal={SCHEDULE_FEATURE_ENABLED ? openScheduleBlank : undefined}
