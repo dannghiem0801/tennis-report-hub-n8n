@@ -50,7 +50,15 @@ export interface FootballSourceResult {
 
 interface FirecrawlSearchResponse {
   success?: boolean;
-  data?: Array<{ url?: string; title?: string; markdown?: string }>;
+  /**
+   * Firecrawl `/v2/search` returns `data` as an OBJECT with sub-arrays
+   * (e.g. `{ web: [...], news: [...], images: [...] }`), not as a flat
+   * array. We always pull from `data.web` — the standard web results.
+   * If the upstream shape changes, `normalizeSearchResults()` adapts.
+   */
+  data?:
+    | Array<{ url?: string; title?: string; markdown?: string }>
+    | { web?: Array<{ url?: string; title?: string; markdown?: string }>; news?: unknown[]; images?: unknown[] };
   warning?: string;
   error?: string;
 }
@@ -81,6 +89,21 @@ async function firecrawlSearch(query: string, apiKey: string): Promise<Firecrawl
     clearTimeout(timeoutId);
     return { error: e instanceof Error ? e.message : "network" };
   }
+}
+
+/**
+ * Normalize Firecrawl `/v2/search` response to a flat array of results.
+ * Upstream returns either:
+ *   - `{ data: [...] }` (older / alternate shape)
+ *   - `{ data: { web: [...], news: [...], images: [...] } }` (current shape)
+ * We always pull from `data.web` when nested; falls back to the array
+ * itself for the flat shape. Returns [] on any unrecognized shape.
+ */
+function normalizeSearchResults(data: FirecrawlSearchResponse["data"]): Array<{ url?: string; title?: string; markdown?: string }> {
+  if (!data) return [];
+  if (Array.isArray(data)) return data;
+  if (typeof data === "object" && Array.isArray(data.web)) return data.web;
+  return [];
 }
 
 async function firecrawlScrape(url: string, apiKey: string): Promise<FirecrawlScrapeResponse> {
@@ -137,13 +160,19 @@ export async function fetchFootballSources(match: FootballMatch): Promise<Footba
     console.log(`[football-sources] search: "${query}"`);
 
     const search = await firecrawlSearch(query, apiKey);
-    if (search.error || !search.data) {
+    if (search.error) {
       // eslint-disable-next-line no-console
-      console.log(`[football-sources] search failed: ${search.error ?? "no data"}`);
+      console.log(`[football-sources] search failed: ${search.error}`);
+      continue;
+    }
+    const results = normalizeSearchResults(search.data);
+    if (results.length === 0) {
+      // eslint-disable-next-line no-console
+      console.log(`[football-sources] search returned 0 results for "${query}"`);
       continue;
     }
 
-    for (const r of search.data) {
+    for (const r of results) {
       if (scraped.length >= MAX_SOURCES) break;
       if (!r.url || seen.has(r.url)) continue;
       // Skip domains that are unlikely to have live blogs
