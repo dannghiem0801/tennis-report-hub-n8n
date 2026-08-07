@@ -1,0 +1,13 @@
+{
+  "$schema": "https://openapi.vercel.sh/vercel.json",
+  "rewrites": [
+    {
+      "source": "/((?!api/|assets/|favicon.svg|icons.svg).*)",
+      "destination": "/index.html"
+    },
+    {
+      "source": "/api/flashscore/:path*",
+      "destination": "/api/flashscore-handler"
+    }
+  ]
+}
