@@ -1,5 +1,5 @@
 import { Star, FileText, Clock } from "lucide-react";
-import type { Match, SetScore } from "@/types";
+import type { FootballMatch, Match, SetScore, TennisMatch } from "@/types";
 import { Button } from "@/components/ui/button";
 import { cn, formatTime } from "@/lib/utils";
 import { SCHEDULE_FEATURE_ENABLED } from "@/lib/feature-flags";
@@ -37,10 +37,15 @@ export function MatchRow({ match, compact: _compact, onOpenReport, onOpenSchedul
     onOpenScheduleModal?.(match.id);
   };
 
-  // Winner: most sets won
-  // v1.5 MVP: this component is tennis-only. Football matches
-  // (match.sport === "football") need a separate MatchRow variant
-  // because the score shape is goals, not sets.
+  // v1.5 multi-sport: branch on match.sport. Football matches get a
+  // minimal score row (team + goals); tennis keeps the sets/games
+  // layout. v1.6 will refactor into a shared factory + sport-specific
+  // sub-components.
+  const isLive = match.status === "live";
+  const isCompleted = match.status === "completed";
+  const isScheduled = match.status === "scheduled";
+
+  // Tennis score derivation (sets won, per-set games)
   const tennisMatch = match as TennisMatch;
   const sets = tennisMatch.sets || [];
   const setsWon = tennisMatch.setsWon as { side1: number; side2: number } | undefined;
@@ -48,9 +53,13 @@ export function MatchRow({ match, compact: _compact, onOpenReport, onOpenSchedul
   const p2SetsWon = setsWon?.side2 ?? sets.filter((s: SetScore) => s.player2 > s.player1).length;
   const p1Won = match.status === "completed" && p1SetsWon > p2SetsWon;
   const p2Won = match.status === "completed" && p2SetsWon > p1SetsWon;
-  const isLive = match.status === "live";
-  const isCompleted = match.status === "completed";
-  const isScheduled = match.status === "scheduled";
+
+  // Football score derivation (final goals)
+  const footballMatch = match.sport === "football" ? (match as FootballMatch) : null;
+  const fbFinal = footballMatch?.finalScore;
+  const fbHasScore = !!fbFinal && typeof fbFinal.side1 === "number" && typeof fbFinal.side2 === "number";
+  const homeWon = footballMatch && match.status === "completed" && fbHasScore && fbFinal.side1 > fbFinal.side2;
+  const awayWon = footballMatch && match.status === "completed" && fbHasScore && fbFinal.side2 > fbFinal.side1;
 
   return (
     <div
@@ -101,34 +110,55 @@ export function MatchRow({ match, compact: _compact, onOpenReport, onOpenSchedul
         )}
       </div>
 
-      {/* Players + score */}
+      {/* Players/teams + score (sport-aware) */}
       <div className="flex flex-col gap-1 min-w-0">
-        <PlayerScoreRow
-          flag={tennisMatch.player1.countryFlag}
-          country={tennisMatch.player1.country}
-          name={tennisMatch.player1.fullName || tennisMatch.player1.name}
-          rank={tennisMatch.player1.ranking}
-          seed={tennisMatch.player1.seed}
-          setsWon={p1SetsWon}
-          sets={sets}
-          isLive={isLive}
-          isPlayer1={true}
-          isWinner={p1Won}
-          currentSetScore={tennisMatch.currentSetScore}
-        />
-        <PlayerScoreRow
-          flag={tennisMatch.player2.countryFlag}
-          country={tennisMatch.player2.country}
-          name={tennisMatch.player2.fullName || tennisMatch.player2.name}
-          rank={tennisMatch.player2.ranking}
-          seed={tennisMatch.player2.seed}
-          setsWon={p2SetsWon}
-          sets={sets}
-          isLive={isLive}
-          isPlayer1={false}
-          isWinner={p2Won}
-          currentSetScore={tennisMatch.currentSetScore}
-        />
+        {match.sport === "football" && footballMatch ? (
+          <>
+            <TeamScoreRow
+              flag={footballMatch.home.countryFlag}
+              name={footballMatch.home.name}
+              shortName={footballMatch.home.shortName}
+              goals={fbHasScore ? fbFinal!.side1 : null}
+              isWinner={!!homeWon}
+            />
+            <TeamScoreRow
+              flag={footballMatch.away.countryFlag}
+              name={footballMatch.away.name}
+              shortName={footballMatch.away.shortName}
+              goals={fbHasScore ? fbFinal!.side2 : null}
+              isWinner={!!awayWon}
+            />
+          </>
+        ) : (
+          <>
+            <PlayerScoreRow
+              flag={tennisMatch.player1.countryFlag}
+              country={tennisMatch.player1.country}
+              name={tennisMatch.player1.fullName || tennisMatch.player1.name}
+              rank={tennisMatch.player1.ranking}
+              seed={tennisMatch.player1.seed}
+              setsWon={p1SetsWon}
+              sets={sets}
+              isLive={isLive}
+              isPlayer1={true}
+              isWinner={p1Won}
+              currentSetScore={tennisMatch.currentSetScore}
+            />
+            <PlayerScoreRow
+              flag={tennisMatch.player2.countryFlag}
+              country={tennisMatch.player2.country}
+              name={tennisMatch.player2.fullName || tennisMatch.player2.name}
+              rank={tennisMatch.player2.ranking}
+              seed={tennisMatch.player2.seed}
+              setsWon={p2SetsWon}
+              sets={sets}
+              isLive={isLive}
+              isPlayer1={false}
+              isWinner={p2Won}
+              currentSetScore={tennisMatch.currentSetScore}
+            />
+          </>
+        )}
       </div>
 
       {/* Status badge (PREVIEW for scheduled) / Report button (completed) / Schedule button (live) */}
@@ -181,6 +211,58 @@ export function MatchRow({ match, compact: _compact, onOpenReport, onOpenSchedul
 /* ------------------------------------------------------------------ */
 /*  Sub-components                                                     */
 /* ------------------------------------------------------------------ */
+
+/**
+ * v1.5 MVP: minimal football team score row. Just team name + goals.
+ * No possession bar / shot stats / event timeline — those land in
+ * v1.6 with a proper football match-row redesign.
+ */
+function TeamScoreRow({
+  flag,
+  name,
+  shortName,
+  goals,
+  isWinner,
+}: {
+  flag: string;
+  name: string;
+  shortName?: string;
+  goals: number | null;
+  isWinner: boolean;
+}) {
+  return (
+    <div
+      className={cn(
+        "flex items-center gap-3 truncate text-[13px]",
+        isWinner ? "font-bold text-slate-50" : "text-slate-300"
+      )}
+      title={name}
+    >
+      {/* Team flag / logo */}
+      <span className="inline-flex h-4 w-5 flex-shrink-0 items-center justify-center text-base leading-none">
+        {flag && flag !== "🏳️" ? flag : <span className="block h-2 w-3 rounded-sm bg-slate-700" />}
+      </span>
+
+      {/* Team name */}
+      <span className="flex items-center gap-1.5 truncate min-w-0">
+        <span className="truncate">{name || "TBD"}</span>
+        {shortName && shortName !== name && (
+          <span className="flex-shrink-0 text-[10px] text-slate-500">({shortName})</span>
+        )}
+      </span>
+
+      {/* Final score (goals) */}
+      <span
+        className={cn(
+          "ml-auto flex-shrink-0 rounded px-1.5 py-0.5 font-mono text-[12px] tabular-nums",
+          isWinner ? "bg-emerald-500/15 text-emerald-300" : "bg-slate-800 text-slate-200"
+        )}
+      >
+        {goals === null ? "—" : goals}
+      </span>
+    </div>
+  );
+}
 
 function PlayerScoreRow({
   flag,

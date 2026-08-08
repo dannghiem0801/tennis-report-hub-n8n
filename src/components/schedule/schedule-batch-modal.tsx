@@ -101,7 +101,7 @@ export function ScheduleBatchModal({
   onOpenChange,
   preSelectedMatchIds = [],
 }: ScheduleBatchModalProps) {
-  const { watchlist, addScheduledBatch } = useApp();
+  const { watchlist, addScheduledBatch, activeSport } = useApp();
 
   // Selected WatchlistEntry ids that will go into the batch.
   const [selectedEntryIds, setSelectedEntryIds] = useState<Set<string>>(
@@ -183,6 +183,7 @@ export function ScheduleBatchModal({
           hour: "2-digit",
           minute: "2-digit",
         })} — ${entryIds.length} trận`,
+        sport: activeSport,
         fireAt,
         watchlistEntryIds: entryIds,
       });
@@ -245,7 +246,7 @@ export function ScheduleBatchModal({
                   <EntryCheckboxRow
                     key={entry.id}
                     checked={selectedEntryIds.has(entry.id)}
-                    label={`${entry.player1Name} vs ${entry.player2Name}`}
+                    label={`${entry.side1Name} vs ${entry.side2Name}`}
                     sublabel={`${formatTime(new Date(entry.startTime))} · ${entry.tournamentName.split("—")[0]?.trim()}`}
                     onToggle={() => toggleEntry(entry.id)}
                   />

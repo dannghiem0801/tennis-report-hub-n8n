@@ -15,6 +15,7 @@ import { formatDateVi, formatTime } from "@/lib/utils";
 import { TournamentBadge } from "@/components/ui/tournament-badge";
 import { formatFinalScore } from "@/lib/format-helpers";
 import { PointByPointViewer } from "@/components/reports/point-by-point-viewer";
+import type { TennisMatch } from "@/types";
 
 interface ReportViewerProps {
   matchId: string | null;
@@ -171,8 +172,8 @@ export function ReportViewer({ matchId, onClose }: ReportViewerProps) {
 
           {/* Point-by-point tabbed viewer — only when we have PBP data
               (match was added to the watchlist and PBP fetch succeeded). */}
-          {!isPrompt && (match as TennisMatch).pointByPoint && (match as TennisMatch).pointByPoint.sets.length > 0 && (
-            <PointByPointViewer match={match} />
+          {!isPrompt && (match as TennisMatch).pointByPoint && (match as TennisMatch).pointByPoint!.sets.length > 0 && (
+            <PointByPointViewer match={match as TennisMatch} />
           )}
         </div>
 

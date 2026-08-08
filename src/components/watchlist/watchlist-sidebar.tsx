@@ -1,5 +1,5 @@
-import { useState } from "react";
-import { Star, X, FileText, Trash2, Sparkles, Clock } from "lucide-react";
+import { useMemo, useState } from "react";
+import { Star, X, FileText, Trash2, Sparkles, Clock, ChevronDown } from "lucide-react";
 import { useApp } from "@/store/app-store";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Button } from "@/components/ui/button";
@@ -7,22 +7,85 @@ import { cn, formatDateShort, formatTime } from "@/lib/utils";
 import { SCHEDULE_FEATURE_ENABLED } from "@/lib/feature-flags";
 import { WatchlistStatusBadge } from "@/components/ui/status-badge";
 import { ScheduledBatchesPanel } from "@/components/schedule/scheduled-batches-panel";
-import type { Report, WatchlistEntry } from "@/types";
+import type { Report, Sport, WatchlistEntry } from "@/types";
 
 interface WatchlistSidebarProps {
   onOpenReport?: (matchId: string) => void;
   onOpenScheduleModal?: () => void;
 }
 
+/**
+ * Sport section metadata (label + flag). Order here is the order
+ * sections render in the sidebar. Per ADR 0002, the watchlist is
+ * sport-agnostic but rendered with per-sport group headers so the
+ * user can still see which sport a match belongs to.
+ */
+const SPORT_META: Record<Sport, { label: string; flag: string }> = {
+  tennis: { label: "Tennis", flag: "🎾" },
+  football: { label: "Bóng đá", flag: "⚽" },
+  basketball: { label: "Bóng rổ", flag: "🏀" },
+};
+
+/**
+ * Group a list of items by `sport`, preserving the canonical order
+ * from `Object.keys(SPORT_META)`. Empty sport groups are filtered
+ * out so we don't render headers for sports the user has no entries
+ * in.
+ */
+function groupBySport<T extends { sport: Sport }>(
+  items: T[]
+): Array<{ sport: Sport; items: T[] }> {
+  const by = new Map<Sport, T[]>();
+  for (const item of items) {
+    const list = by.get(item.sport);
+    if (list) list.push(item);
+    else by.set(item.sport, [item]);
+  }
+  return Object.keys(SPORT_META)
+    .filter((s): s is Sport => by.has(s as Sport))
+    .map((sport) => ({ sport, items: by.get(sport) ?? [] }));
+}
+
+/**
+ * Sort entries by start time. Pending tab = ascending (next match
+ * first); completed tab = descending (most recent first). The sort
+ * is on the ISO `startTime` string, which sorts correctly as a date.
+ */
+function sortByStartTime<T extends { startTime: string }>(
+  items: T[],
+  dir: "asc" | "desc"
+): T[] {
+  const factor = dir === "asc" ? 1 : -1;
+  return [...items].sort((a, b) => a.startTime.localeCompare(b.startTime) * factor);
+}
+
 export function WatchlistSidebar({ onOpenReport, onOpenScheduleModal }: WatchlistSidebarProps) {
   const { watchlist, reports, isWatchlisted, toggleWatchlist, markReportSeen, scheduledBatches } = useApp();
-  const pending = watchlist.filter((w) => w.status !== "completed");
-  const completed = watchlist.filter((w) => w.status === "completed");
+  const pending = useMemo(
+    () => watchlist.filter((w) => w.status !== "completed"),
+    [watchlist]
+  );
+  const completed = useMemo(
+    () => watchlist.filter((w) => w.status === "completed"),
+    [watchlist]
+  );
   const activeBatches = scheduledBatches.filter(
     (b) => b.status === "pending" || b.status === "running"
   );
   void isWatchlisted;
   void toggleWatchlist;
+
+  // Pre-compute grouped+sorted lists so the same computation isn't
+  // repeated across renders. ADR 0002: group by sport, sort by start
+  // time within each group.
+  const pendingGroups = useMemo(
+    () => groupBySport(sortByStartTime(pending, "asc")),
+    [pending]
+  );
+  const completedGroups = useMemo(
+    () => groupBySport(sortByStartTime(completed, "desc")),
+    [completed]
+  );
 
   return (
     <div className="flex h-full flex-col overflow-hidden rounded-lg border border-slate-800 bg-slate-800/40">
@@ -66,12 +129,17 @@ export function WatchlistSidebar({ onOpenReport, onOpenScheduleModal }: Watchlis
               description="Bạn chưa theo dõi trận nào. Duyệt lịch đấu và nhấn ⭐ để thêm."
             />
           ) : (
-            <div className="flex flex-col gap-1.5">
-              {pending.map((entry) => (
-                <PendingItem
-                  key={entry.id}
-                  entry={entry}
-                />
+            <div className="flex flex-col gap-3">
+              {pendingGroups.map(({ sport, items }) => (
+                <SportSection
+                  key={sport}
+                  sport={sport}
+                  count={items.length}
+                >
+                  {items.map((entry) => (
+                    <PendingItem key={entry.id} entry={entry} />
+                  ))}
+                </SportSection>
               ))}
             </div>
           )}
@@ -84,22 +152,30 @@ export function WatchlistSidebar({ onOpenReport, onOpenScheduleModal }: Watchlis
               description="Khi trận bạn theo dõi kết thúc, báo cáo sẽ tự động xuất hiện tại đây."
             />
           ) : (
-            <div className="flex flex-col gap-2">
-              {completed.map((entry) => {
-                const report = reports.find((r) => r.watchlistId === entry.id);
-                if (!report) return null;
-                return (
-                  <CompletedItem
-                    key={entry.id}
-                    entry={entry}
-                    report={report}
-                    onOpenReport={() => {
-                      markReportSeen(report.id);
-                      onOpenReport?.(entry.matchApiId);
-                    }}
-                  />
-                );
-              })}
+            <div className="flex flex-col gap-3">
+              {completedGroups.map(({ sport, items }) => (
+                <SportSection
+                  key={sport}
+                  sport={sport}
+                  count={items.length}
+                >
+                  {items.map((entry) => {
+                    const report = reports.find((r) => r.watchlistId === entry.id);
+                    if (!report) return null;
+                    return (
+                      <CompletedItem
+                        key={entry.id}
+                        entry={entry}
+                        report={report}
+                        onOpenReport={() => {
+                          markReportSeen(report.id);
+                          onOpenReport?.(entry.matchApiId);
+                        }}
+                      />
+                    );
+                  })}
+                </SportSection>
+              ))}
             </div>
           )}
         </TabsContent>
@@ -116,6 +192,46 @@ export function WatchlistSidebar({ onOpenReport, onOpenScheduleModal }: Watchlis
   );
 }
 
+/**
+ * Per-sport group header. Collapsible — the user can collapse a
+ * sport section to focus on the other(s). Default state: expanded.
+ * Persists nothing; on reload, all sections start expanded.
+ */
+function SportSection({
+  sport,
+  count,
+  children,
+}: {
+  sport: Sport;
+  count: number;
+  children: React.ReactNode;
+}) {
+  const [collapsed, setCollapsed] = useState(false);
+  const meta = SPORT_META[sport];
+  return (
+    <div className="flex flex-col gap-1.5">
+      <button
+        type="button"
+        onClick={() => setCollapsed((c) => !c)}
+        className="flex items-center gap-1.5 rounded px-1 py-0.5 text-[11px] font-semibold uppercase tracking-wide text-slate-400 transition-colors hover:text-slate-200"
+        aria-expanded={!collapsed}
+        title={collapsed ? `Mở rộng ${meta.label}` : `Thu gọn ${meta.label}`}
+      >
+        <ChevronDown
+          className={cn(
+            "h-3 w-3 transition-transform",
+            collapsed && "-rotate-90"
+          )}
+        />
+        <span>{meta.flag}</span>
+        <span>{meta.label}</span>
+        <span className="font-mono text-[10px] text-slate-500">({count})</span>
+      </button>
+      {!collapsed && <div className="flex flex-col gap-1.5">{children}</div>}
+    </div>
+  );
+}
+
 function PendingItem({
   entry,
 }: {
@@ -124,19 +240,29 @@ function PendingItem({
 }) {
   const { removeFromWatchlist } = useApp();
   const startTime = new Date(entry.startTime);
+  // Per-row sport chip (ADR 0002): even when the section is
+  // collapsed, the user can still tell which sport the match is.
+  const sportFlag = SPORT_META[entry.sport].flag;
   return (
     <div className="group rounded-md border border-slate-800 bg-slate-900/40 p-2.5 transition-colors hover:border-slate-700">
       <div className="flex items-start justify-between gap-2">
         <div className="min-w-0 flex-1">
           <div className="flex items-center gap-1.5 text-[12px] text-slate-200">
-            <span>{entry.player1Flag}</span>
+            <span
+              className="inline-flex h-4 w-4 flex-shrink-0 items-center justify-center rounded-sm bg-slate-800/80 text-[10px]"
+              title={SPORT_META[entry.sport].label}
+              aria-label={SPORT_META[entry.sport].label}
+            >
+              {sportFlag}
+            </span>
+            <span>{entry.side1Flag}</span>
             <span className="truncate font-medium">
-              {entry.player1Name}
+              {entry.side1Name}
             </span>
             <span className="text-slate-500">vs</span>
-            <span>{entry.player2Flag}</span>
+            <span>{entry.side2Flag}</span>
             <span className="truncate font-medium">
-              {entry.player2Name}
+              {entry.side2Name}
             </span>
           </div>
           <div className="mt-1 flex items-center gap-2 text-[10px] text-slate-500">
@@ -188,6 +314,10 @@ function CompletedItem({
     .replace(/\*\*/g, "")
     .replace(/\n+/g, " ")
     .slice(0, 110);
+  // Per-row sport chip (ADR 0002): keeps the sport visible when
+  // sections are collapsed.
+  const sportFlag = SPORT_META[entry.sport].flag;
+  const sportLabel = SPORT_META[entry.sport].label;
 
   const handleCopy = async (e: React.MouseEvent) => {
     e.stopPropagation();
@@ -215,9 +345,18 @@ function CompletedItem({
       )}
       <div className="flex items-start justify-between gap-2">
         <div className="min-w-0 flex-1">
-          <h4 className="line-clamp-2 text-[12px] font-semibold leading-snug text-slate-100">
-            {report.title}
-          </h4>
+          <div className="flex items-center gap-1.5">
+            <span
+              className="inline-flex h-4 w-4 flex-shrink-0 items-center justify-center rounded-sm bg-slate-800/80 text-[10px]"
+              title={sportLabel}
+              aria-label={sportLabel}
+            >
+              {sportFlag}
+            </span>
+            <h4 className="line-clamp-2 text-[12px] font-semibold leading-snug text-slate-100">
+              {report.title}
+            </h4>
+          </div>
           <p className="mt-1 line-clamp-2 text-[11px] leading-relaxed text-slate-400">
             {preview}…
           </p>

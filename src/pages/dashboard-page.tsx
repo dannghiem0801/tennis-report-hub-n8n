@@ -22,6 +22,7 @@ import {
 } from "lucide-react";
 import { Link } from "react-router-dom";
 import { formatDateVi, formatTime, parseDateKey } from "@/lib/utils";
+import type { Sport } from "@/types";
 
 export function DashboardPage() {
   const [openMatchId, setOpenMatchId] = useState<string | null>(null);
@@ -38,6 +39,7 @@ export function DashboardPage() {
     userSelectedDate,
     selectedDate,
     setSelectedDate,
+    activeSport,
   } = useApp();
 
   const openScheduleForMatch = (matchId: string) => {
@@ -57,7 +59,7 @@ export function DashboardPage() {
           <RateLimitBanner until={rateLimitUntil} onRetry={refreshMatches} />
         )}
         {matchError && !isRateLimited && (
-          <ErrorBanner message={matchError} onDismiss={dismissMatchError} />
+          <ErrorBanner message={matchError} onDismiss={dismissMatchError} activeSport={activeSport} />
         )}
         {isDateAutoPicked && userSelectedDate !== selectedDate && (
           <AutoPickedBanner
@@ -72,7 +74,7 @@ export function DashboardPage() {
         />
       </div>
 
-      <div className="flex min-h-[600px] flex-col gap-3 lg:sticky lg:top-[88px] lg:h-[calc(100vh-100px)]">
+      <div className="order-first flex min-h-[600px] flex-col gap-3 lg:order-none lg:sticky lg:top-[88px] lg:h-[calc(100vh-100px)]">
         <WatchlistSidebar
           onOpenReport={setOpenMatchId}
           onOpenScheduleModal={SCHEDULE_FEATURE_ENABLED ? openScheduleBlank : undefined}
@@ -105,13 +107,26 @@ export function DashboardPage() {
 }
 
 function DashboardHeader() {
-  const { isUsingLiveData, lastFetchedAt, refreshMatches, isFetchingMatches, isRateLimited, settings } = useApp();
+  const { isUsingLiveData, lastFetchedAt, refreshMatches, isFetchingMatches, isRateLimited, settings, activeSport } = useApp();
   const hasApiKey = !!settings.rapidApiKey?.trim();
+  // Per ADR 0002, the active sport is a dashboard filter, so the
+  // header copy follows the active sport. Watchlist / reports below
+  // remain sport-agnostic regardless.
+  const sportLabel = activeSport === "tennis"
+    ? "tennis"
+    : activeSport === "football"
+      ? "bóng đá"
+      : "bóng rổ";
+  const apiLabel = activeSport === "tennis"
+    ? "Tennis API"
+    : activeSport === "football"
+      ? "Sports API"
+      : "API";
   return (
     <div className="flex items-center justify-between rounded-lg border border-slate-800 bg-slate-800/30 px-4 py-2.5">
       <div>
         <h1 className="text-sm font-semibold text-slate-100">
-          Lịch thi đấu tennis hôm nay
+          Lịch thi đấu {sportLabel} hôm nay
         </h1>
         <p className="mt-0.5 text-[11px] text-slate-400">
           Chọn trận và nhấn ⭐ để thêm vào watchlist. Báo cáo sẽ tự động sinh sau khi trận kết thúc.
@@ -136,10 +151,10 @@ function DashboardHeader() {
           }`}
           title={
             isUsingLiveData
-              ? "Đang lấy dữ liệu trực tiếp từ Tennis API"
+              ? `Đang lấy dữ liệu trực tiếp từ ${apiLabel}`
               : hasApiKey
-                ? "Đang chờ Tennis API phản hồi (lần fetch đầu hoặc sau lỗi tạm thời)"
-                : "Chưa cấu hình Tennis API key. Vào Settings để nhập key."
+                ? `Đang chờ ${apiLabel} phản hồi (lần fetch đầu hoặc sau lỗi tạm thời)`
+                : `Chưa cấu hình ${apiLabel} key. Vào Settings để nhập key.`
           }
         >
           {isUsingLiveData ? (
@@ -239,12 +254,13 @@ function AutoPickedBanner({
   );
 }
 
-function ErrorBanner({ message, onDismiss }: { message: string; onDismiss: () => void }) {
+function ErrorBanner({ message, onDismiss, activeSport }: { message: string; onDismiss: () => void; activeSport?: Sport }) {
+  const apiLabel = activeSport === "football" ? "Sports API" : activeSport === "basketball" ? "API" : "Tennis API";
   return (
     <div className="flex items-start gap-2 rounded-md border border-amber-700/50 bg-amber-900/20 px-3 py-2 text-[12px] text-amber-200">
       <AlertTriangle className="mt-0.5 h-3.5 w-3.5 flex-shrink-0 text-amber-400" />
       <div className="flex-1">
-        <div className="font-medium text-amber-100">Tennis API: không tải được dữ liệu mới</div>
+        <div className="font-medium text-amber-100">{apiLabel}: không tải được dữ liệu mới</div>
         <div className="mt-0.5 text-amber-200/90">{message}</div>
         <div className="mt-1 text-[11px] text-amber-300/70">
           Bấm <strong>Refresh</strong> để thử lại, hoặc vào Settings kiểm tra API key nếu lỗi lặp lại.

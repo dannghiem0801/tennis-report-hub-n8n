@@ -3,12 +3,19 @@ import { Calendar, ChevronLeft, ChevronRight, RefreshCw, History, FileText, Sett
 import { useApp } from "@/store/app-store";
 import { Button } from "@/components/ui/button";
 import { cn, formatDateVi, formatDateKey, parseDateKey, timeAgo } from "@/lib/utils";
+import type { Sport } from "@/types";
 
-const SPORTS = [
+/**
+ * Top-level sport selector. v1.5 enables Tennis + Football; Basketball
+ * is "Coming Soon". Toggling football requires a re-fetch of the
+ * dashboard for sportId=1, which `setActiveSport` triggers via
+ * activeSport context value.
+ */
+const SPORTS: { id: Sport; label: string; active: boolean; flag: string }[] = [
   { id: "tennis", label: "Tennis", active: true, flag: "🎾" },
-  { id: "football", label: "Bóng đá", active: false, flag: "⚽" },
+  { id: "football", label: "Bóng đá", active: true, flag: "⚽" },
   { id: "basketball", label: "Bóng rổ", active: false, flag: "🏀" },
-] as const;
+];
 
 const NAV_ITEMS = [
   { to: "/", label: "Dashboard", icon: Activity },
@@ -18,7 +25,16 @@ const NAV_ITEMS = [
 ] as const;
 
 export function TopBar() {
-  const { selectedDate, setSelectedDate, refreshMatches, isFetchingMatches, lastFetchedAt, matchError } = useApp();
+  const {
+    activeSport,
+    setActiveSport,
+    selectedDate,
+    setSelectedDate,
+    refreshMatches,
+    isFetchingMatches,
+    lastFetchedAt,
+    matchError,
+  } = useApp();
   const today = formatDateKey(new Date());
   const isToday = selectedDate === today;
   const dateLabel = isToday
@@ -37,33 +53,47 @@ export function TopBar() {
       <div className="flex items-center gap-1 border-b border-slate-800/60 px-4 py-1.5">
         <Link to="/" className="mr-3 flex items-center gap-2">
           <div className="flex h-7 w-7 items-center justify-center rounded-md bg-blue-500/20 text-base">
-            🎾
+            {activeSport === "football" ? "⚽" : "🎾"}
           </div>
           <span className="text-sm font-semibold tracking-tight text-slate-100">
-            Tennis Report Hub
+            {activeSport === "football" ? "Sports Report Hub" : "Tennis Report Hub"}
           </span>
         </Link>
         <div className="ml-2 flex items-center gap-1">
-          {SPORTS.map((sport) => (
-            <div
-              key={sport.id}
-              className={cn(
-                "flex items-center gap-1.5 rounded-md px-2.5 py-1 text-xs font-medium",
-                sport.active
-                  ? "bg-blue-500/15 text-blue-300"
-                  : "cursor-not-allowed text-slate-500"
-              )}
-              title={sport.active ? sport.label : "Sắp ra mắt"}
-            >
-              <span>{sport.flag}</span>
-              <span>{sport.label}</span>
-              {!sport.active && (
-                <span className="rounded bg-slate-700/60 px-1 py-0.5 text-[9px] uppercase tracking-wide text-slate-400">
-                  Soon
-                </span>
-              )}
-            </div>
-          ))}
+          {SPORTS.map((sport) => {
+            const isActive = sport.id === activeSport;
+            return (
+              <button
+                key={sport.id}
+                type="button"
+                disabled={!sport.active}
+                onClick={() => sport.active && setActiveSport(sport.id)}
+                className={cn(
+                  "flex items-center gap-1.5 rounded-md px-2.5 py-1 text-xs font-medium transition-colors",
+                  sport.active && isActive
+                    ? "bg-blue-500/15 text-blue-300"
+                    : sport.active
+                    ? "text-slate-400 hover:bg-slate-800/50 hover:text-slate-200"
+                    : "cursor-not-allowed text-slate-500"
+                )}
+                title={
+                  sport.active
+                    ? isActive
+                      ? `Đang xem ${sport.label}`
+                      : `Chuyển sang ${sport.label}`
+                    : "Sắp ra mắt"
+                }
+              >
+                <span>{sport.flag}</span>
+                <span>{sport.label}</span>
+                {!sport.active && (
+                  <span className="rounded bg-slate-700/60 px-1 py-0.5 text-[9px] uppercase tracking-wide text-slate-400">
+                    Soon
+                  </span>
+                )}
+              </button>
+            );
+          })}
         </div>
       </div>
 

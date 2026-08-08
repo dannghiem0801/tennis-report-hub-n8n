@@ -46,6 +46,8 @@ const SPORT_ID_MAP: Record<Sport, number> = {
 
 /**
  * Display label for an empty-dashboard error message, sport-aware.
+ * Tennis has its own legacy label; football uses a generic "Sports API key"
+ * label that reads naturally in Vietnamese.
  */
 function emptyKeyErrorMessage(sport: Sport): string {
   if (sport === "tennis") {
@@ -59,6 +61,10 @@ function emptyKeyErrorMessage(sport: Sport): string {
 
 interface AppState {
   // data
+  /** Sport currently selected on the TopBar. Drives all filtering
+   *  (watchlist, reports, templates, scheduled batches) and the
+   *  sportId passed to the API. Persisted in localStorage. */
+  activeSport: Sport;
   selectedDate: string; // YYYY-MM-DD
   matches: Match[];
   tournaments: Tournament[]; // populated when using real API; empty for sample data
@@ -88,6 +94,9 @@ interface AppState {
 
   // actions
   setSelectedDate: (key: string) => void;
+  /** Switch the active sport. Persists to localStorage, triggers a
+   *  refetch of the dashboard for the new sport, and reloads the
+   *  per-sport watchlist / reports / templates / scheduled batches. */
   setActiveSport: (sport: Sport) => void;
   refreshMatches: () => Promise<void>;
   toggleWatchlist: (match: Match) => void;
@@ -165,7 +174,7 @@ async function fetchAndCacheMatchData(
   apiKey: string,
   requestedRef: MutableRefObject<Set<string>>,
   setMatches: Dispatch<SetStateAction<Match[]>>,
-): Promise<{ sets?: Match["sets"]; pointByPoint?: Match["pointByPoint"]; stats?: Match["stats"] }> {
+): Promise<{ sets?: TennisMatch["sets"]; pointByPoint?: TennisMatch["pointByPoint"]; stats?: TennisMatch["stats"] }> {
   // Fire both calls in parallel. allSettled guarantees we get both
   // outcomes even if one rejects.
   const [detailsResult, pbpResult] = await Promise.allSettled([
@@ -187,14 +196,14 @@ async function fetchAndCacheMatchData(
   }
 
   // Patch only the fields that succeeded.
-  const patch: Partial<Match> = {};
+  const patch: Partial<TennisMatch> = {};
   if (details?.sets && details.sets.length > 0) patch.sets = details.sets;
   if (details?.stats) patch.stats = details.stats;
   if (pbp && pbp.sets.length > 0) patch.pointByPoint = pbp;
 
   if (Object.keys(patch).length > 0) {
     setMatches((current) =>
-      current.map((m) => (m.id === matchId ? { ...m, ...patch } : m))
+      current.map((m) => (m.id === matchId ? ({ ...m, ...patch } as Match) : m))
     );
   }
 
@@ -205,9 +214,16 @@ export function AppProvider({ children }: { children: ReactNode }) {
   // Active sport (single key, persisted). Initial value from localStorage.
   const [activeSport, setActiveSportInternal] = useState<Sport>(() => storage.getActiveSport());
 
-  // user data — per-sport, loaded for the active sport.
-  const [watchlist, setWatchlist] = useState<WatchlistEntry[]>(() => storage.getWatchlist(activeSport));
-  const [reports, setReports] = useState<Report[]>(() => storage.getReports(activeSport));
+  // user data — per-sport (templates) and unified (everything else).
+  //
+  // Per ADR 0003, watchlist / reports / scheduled batches are unified
+  // across all sports and do NOT swap on active-sport change. The
+  // unified storage methods aggregate per-sport localStorage keys so
+  // existing data is preserved (no migration needed). Only templates
+  // remain per-sport (they encode sport-specific prompt structure)
+  // and the dashboard match list.
+  const [watchlist, setWatchlist] = useState<WatchlistEntry[]>(() => storage.getUnifiedWatchlist());
+  const [reports, setReports] = useState<Report[]>(() => storage.getUnifiedReports());
   const [templates, setTemplates] = useState<ReportTemplate[]>(() => {
     const saved = storage.getTemplates(activeSport);
     if (saved.length > 0) {
@@ -230,23 +246,24 @@ export function AppProvider({ children }: { children: ReactNode }) {
     // the new default. The user can switch back via Settings.
     return { ...saved, llm: migrateLLMConfig(saved.llm) };
   });
-  const [seenReportIds, setSeenReportIds] = useState<string[]>(() => storage.getSeenReportIds(activeSport));
+  const [seenReportIds, setSeenReportIds] = useState<string[]>(() => storage.getUnifiedSeenReportIds());
   const [scheduledBatches, setScheduledBatches] = useState<ScheduledBatch[]>(() =>
-    storage.getScheduledBatches(activeSport)
+    storage.getUnifiedScheduledBatches()
   );
 
   /**
-   * Switch active sport. Persists to localStorage, reloads per-sport
-   * data, clears in-flight matches, and triggers a refetch.
+   * Switch active sport. Per ADR 0003, the active sport is a
+   * **dashboard filter only** — it controls which sport's fixtures
+   * the tournament browser shows. Watchlist / reports / scheduled
+   * batches are sport-agnostic and do NOT swap. Templates stay
+   * per-sport (different prompts per sport) and reload on switch.
    */
   const setActiveSport = useCallback((sport: Sport) => {
     setActiveSportInternal((current) => {
       if (current === sport) return current;
       storage.setActiveSport(sport);
-      setWatchlist(storage.getWatchlist(sport));
-      setReports(storage.getReports(sport));
-      setSeenReportIds(storage.getSeenReportIds(sport));
-      setScheduledBatches(storage.getScheduledBatches(sport));
+      // Templates are per-sport (per ADR 0003). Reload for the new
+      // sport; fall back to bundled defaults if first run.
       const tpl = storage.getTemplates(sport);
       if (tpl.length > 0) {
         setTemplates(tpl);
@@ -255,11 +272,19 @@ export function AppProvider({ children }: { children: ReactNode }) {
         storage.setTemplates(sport, bundled);
         setTemplates(bundled);
       }
+      // Clear the dashboard so we don't briefly show the previous
+      // sport's matches while the new fetch is in flight.
       setMatches([]);
       setTournaments([]);
+      // Trigger a refetch for the new sport at the current date.
+      sportSwitchRef.current += 1;
       return sport;
     });
   }, []);
+
+  /** Bumped on every sport switch; fetchMatches reads this to know
+   *  when to refetch for the new sport. */
+  const sportSwitchRef = useRef(0);
 
   // matches
   const [selectedDate, setSelectedDateInternal] = useState<string>(() => formatDateKey(new Date()));
@@ -286,13 +311,14 @@ export function AppProvider({ children }: { children: ReactNode }) {
   const [isDateAutoPicked, setIsDateAutoPicked] = useState(false);
   const [userSelectedDate, setUserSelectedDate] = useState<string>(() => formatDateKey(new Date()));
 
-  // persist (per-sport for entity data; settings is shared)
-  useEffect(() => storage.setWatchlist(activeSport, watchlist), [watchlist, activeSport]);
-  useEffect(() => storage.setReports(activeSport, reports), [reports, activeSport]);
+  // persist (unified for watchlist / reports / batches; per-sport for
+  // templates; shared for settings). Per ADR 0003.
+  useEffect(() => storage.setUnifiedWatchlist(watchlist), [watchlist]);
+  useEffect(() => storage.setUnifiedReports(reports), [reports]);
   useEffect(() => storage.setTemplates(activeSport, templates), [templates, activeSport]);
   useEffect(() => storage.setSettings(settings), [settings]);
-  useEffect(() => storage.setSeenReportIds(activeSport, seenReportIds), [seenReportIds, activeSport]);
-  useEffect(() => storage.setScheduledBatches(activeSport, scheduledBatches), [scheduledBatches, activeSport]);
+  useEffect(() => storage.setUnifiedSeenReportIds(seenReportIds), [seenReportIds]);
+  useEffect(() => storage.setUnifiedScheduledBatches(scheduledBatches), [scheduledBatches]);
 
   // fetch matches
   // Use a ref to read current matches length without re-creating this callback
@@ -339,7 +365,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
         }
 
         // Real API path: FlashScore4 (single call per day).
-        //   GET /api/flashscore/v2/matches/list-by-date?sport_id=2&date=YYYY-MM-DD&timezone=Asia/Ho_Chi_Minh
+        //   GET /api/flashscore/v2/matches/list-by-date?sport_id={sportId}&date=YYYY-MM-DD&timezone=Asia/Ho_Chi_Minh
         //   Response shape: TBD — mapper handles multiple common patterns
         //   defensively (see src/api/flashscore-mapper.ts for path arrays).
         // Cached 30 min, in-flight deduped inside flashscore.ts.
@@ -369,6 +395,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
         const { matches: mappedMatches, tournaments: mappedTournaments } = mapMatchesBatch({
           payload,
           dateKey,
+          sport: activeSport,
         });
 
         setMatches(mappedMatches);
@@ -395,7 +422,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
                 date: key,
                 timezone: APP_TIMEZONE,
               });
-              const fb = mapMatchesBatch({ payload: fallbackPayload, dateKey: key });
+              const fb = mapMatchesBatch({ payload: fallbackPayload, dateKey: key, sport: activeSport });
               if (fb.matches.length > 0) {
                 // eslint-disable-next-line no-console
                 console.log(
@@ -466,7 +493,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
             date: key,
             timezone: APP_TIMEZONE,
           });
-          const { matches: foundMatches } = mapMatchesBatch({ payload, dateKey: key });
+          const { matches: foundMatches } = mapMatchesBatch({ payload, dateKey: key, sport: activeSport });
           if (foundMatches.length > 0) {
             // Switch to that date and mark as auto-picked
             setSelectedDateInternal(key);
@@ -517,6 +544,145 @@ export function AppProvider({ children }: { children: ReactNode }) {
       }
     };
   }, [settings.pollingIntervalMinutes, selectedDate, fetchMatches, isRateLimited]);
+
+  // Per-entry background poll (ADR 0003 — cross-sport completion
+  // detection). The dashboard fast-path only fires for entries
+  // whose match is in the current `matches` array (i.e. active
+  // sport, selected date). For cross-sport and cross-date entries
+  // we need a separate poll.
+  //
+  // Batched by `(sport, date)`: pending entries are grouped, each
+  // unique pair is fetched once per cycle, and the 30-min cache
+  // in `flashscore.ts` (`TTL.listByDate`) dedupes. So 10 pending
+  // entries across 3 dates = 3 API calls, not 10.
+  //
+  // Shares `pollingIntervalMinutes` with the dashboard poll
+  // (single knob). Skipped when rate-limited or when polling is
+  // disabled (interval === 0).
+  //
+  // On completion detection: transitions the entry from
+  // `pending` to `fetching-pbp` — same transition the dashboard
+  // fast-path uses. The runGeneration pipeline picks it up and
+  // runs the LLM regardless of `activeSport`.
+  const perEntryPollRef = useRef<number | null>(null);
+  const perEntryPollInFlightRef = useRef<boolean>(false);
+  const watchlistRef = useRef<WatchlistEntry[]>(watchlist);
+  useEffect(() => {
+    watchlistRef.current = watchlist;
+  }, [watchlist]);
+  // Stable key over the set of pending entries. Recomputes only
+  // when the set changes (add/remove/transition), not on every
+  // watchlist mutation.
+  const pendingPollKey = useMemo(() => {
+    return watchlist
+      .filter((e) => e.status === "pending")
+      .map((e) => `${e.id}|${e.sport}|${e.matchDate}|${e.matchApiId}`)
+      .sort()
+      .join(",");
+  }, [watchlist]);
+
+  useEffect(() => {
+    if (perEntryPollRef.current) {
+      window.clearInterval(perEntryPollRef.current);
+      perEntryPollRef.current = null;
+    }
+    if (isRateLimited) return;
+    if (settings.pollingIntervalMinutes === 0) return;
+    if (!settings.rapidApiKey?.trim()) return;
+
+    const apiKey = settings.rapidApiKey.trim();
+
+    const tick = async () => {
+      if (perEntryPollInFlightRef.current) return;
+      perEntryPollInFlightRef.current = true;
+      try {
+        // Snapshot the current pending entries via the ref so
+        // the closure doesn't go stale.
+        const pending = watchlistRef.current.filter(
+          (e) => e.status === "pending"
+        );
+        if (pending.length === 0) return;
+
+        // Group by (sport, date). Each unique pair is fetched once.
+        const byPair = new Map<string, WatchlistEntry[]>();
+        for (const entry of pending) {
+          const key = `${entry.sport}|${entry.matchDate}`;
+          const list = byPair.get(key);
+          if (list) list.push(entry);
+          else byPair.set(key, [entry]);
+        }
+
+        for (const [key, entries] of byPair) {
+          const [sport, date] = key.split("|") as [Sport, string];
+          const sportId = SPORT_ID_MAP[sport];
+          if (!sportId) continue;
+          try {
+            const payload = await getMatchesByDate({
+              apiKey,
+              sportId,
+              date,
+              timezone: APP_TIMEZONE,
+            });
+            const { matches: matched } = mapMatchesBatch({
+              payload,
+              dateKey: date,
+              sport,
+            });
+            const completedIds = new Set(
+              matched
+                .filter((m) => m.status === "completed")
+                .map((m) => m.id)
+            );
+            if (completedIds.size === 0) continue;
+            const toTrigger = entries.filter((e) =>
+              completedIds.has(e.matchApiId)
+            );
+            if (toTrigger.length === 0) continue;
+            const triggerIds = new Set(toTrigger.map((e) => e.id));
+            const now = new Date().toISOString();
+            setWatchlist((current) => {
+              let changed = false;
+              const updated = current.map((e) => {
+                if (!triggerIds.has(e.id)) return e;
+                if (e.status !== "pending") return e;
+                changed = true;
+                return {
+                  ...e,
+                  status: "fetching-pbp" as const,
+                  pipelineStartedAt: now,
+                };
+              });
+              return changed ? updated : current;
+            });
+          } catch {
+            // Silent fail — the next tick retries. Rate-limit
+            // errors propagate through the global listener and
+            // pause future ticks via the `isRateLimited` gate.
+          }
+        }
+      } finally {
+        perEntryPollInFlightRef.current = false;
+      }
+    };
+
+    const ms = Math.max(1, settings.pollingIntervalMinutes) * 60 * 1000;
+    // Fire one tick immediately so newly-added entries get
+    // checked without waiting `ms` for the first interval.
+    void tick();
+    perEntryPollRef.current = window.setInterval(tick, ms);
+    return () => {
+      if (perEntryPollRef.current) {
+        window.clearInterval(perEntryPollRef.current);
+        perEntryPollRef.current = null;
+      }
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [
+    settings.pollingIntervalMinutes,
+    settings.rapidApiKey,
+    isRateLimited,
+    pendingPollKey,
+  ]);
 
   // Lazily enrich watchlist matches with per-set details + point-by-point.
   //
@@ -686,60 +852,71 @@ export function AppProvider({ children }: { children: ReactNode }) {
       };
 
       try {
-        // ─── Step 1: fetch details + PBP (parallel) ──────────────────
+        // ─── Step 1: fetch details + (sport-specific extras) ──────────
         // The watchlist match is the ONLY place we call /matches/details
-        // and /matches/.../point-by-point. The dashboard never fetches
-        // these (set count from list-by-date is enough for dashboard
-        // rendering), so by the time a match reaches the report
-        // pipeline, it should already have at least one of {sets,
-        // pointByPoint} cached from the watchlist add / live→completed
-        // effect. We re-check here in case the cache was cleared or the
-        // match transitioned to completed between sessions.
-        let matchWithPBP = match;
-        // Sport dispatch (ADR 0002): tennis enriches with PBP; football
-        // v1.5 MVP doesn't enrich (events come from list-by-date).
+        // (and /matches/.../point-by-point for tennis). The dashboard
+        // never fetches these (set count from list-by-date is enough
+        // for dashboard rendering), so by the time a match reaches the
+        // report pipeline, it should already have at least the basic
+        // data cached from the watchlist add / live→completed effect.
+        // We re-check here in case the cache was cleared or the match
+        // transitioned to completed between sessions.
+        //
+        // Sport dispatch (ADR 0002):
+        //   - tennis   → /matches/details + /point-by-point (parallel)
+        //   - football → /matches/details only (PBP is tennis-specific;
+        //                football enriches via /details events + stats)
+        let matchWithPBP: Match = match;
         const needsTennisEnrich = match.sport === "tennis" && (
-          !(match as TennisMatch).sets || (match as TennisMatch).sets!.length === 0 || !match.pointByPoint
+          !(match as TennisMatch).sets || (match as TennisMatch).sets!.length === 0 || !(match as TennisMatch).pointByPoint
         );
-        if (match.status === "completed" && needsTennisEnrich && settings.rapidApiKey?.trim()) {
+        const needsFootballEnrich = match.sport === "football" && false; // v1.5 MVP: football events not yet enriched; rely on list-by-date
+        const needsEnrich = (needsTennisEnrich || needsFootballEnrich) && settings.rapidApiKey?.trim();
+        if (match.status === "completed" && needsEnrich) {
           transition("fetching-pbp");
           try {
             const apiKey = settings.rapidApiKey.trim();
-            const [detailsResult, pbpResult] = await Promise.allSettled([
-              getMatchDetails({ apiKey, matchId: match.id }).then(mapMatchDetails),
-              getPointByPoint({ apiKey, matchId: match.id }).then(mapPointByPoint),
-            ]);
+            if (match.sport === "tennis") {
+              // Run both calls in parallel; partial success is fine.
+              const [detailsResult, pbpResult] = await Promise.allSettled([
+                getMatchDetails({ apiKey, matchId: match.id }).then(mapMatchDetails),
+                getPointByPoint({ apiKey, matchId: match.id }).then(mapPointByPoint),
+              ]);
 
-            const patch: Partial<Match> = {};
-            if (
-              detailsResult.status === "fulfilled" &&
-              detailsResult.value.sets &&
-              detailsResult.value.sets.length > 0
-            ) {
-              patch.sets = detailsResult.value.sets;
-              if (detailsResult.value.stats) patch.stats = detailsResult.value.stats;
-            }
-            if (pbpResult.status === "fulfilled" && pbpResult.value) {
-              patch.pointByPoint = pbpResult.value;
-            }
-            if (Object.keys(patch).length > 0) {
-              matchWithPBP = { ...match, ...patch };
-              setMatches((current) =>
-                current.map((m) => (m.id === match.id ? ({ ...m, ...patch } as Match) : m))
-              );
-            }
+              const patch: Partial<TennisMatch> = {};
+              if (
+                detailsResult.status === "fulfilled" &&
+                detailsResult.value.sets &&
+                detailsResult.value.sets.length > 0
+              ) {
+                patch.sets = detailsResult.value.sets;
+                if (detailsResult.value.stats) patch.stats = detailsResult.value.stats;
+              }
+              if (pbpResult.status === "fulfilled" && pbpResult.value) {
+                patch.pointByPoint = pbpResult.value;
+              }
+              if (Object.keys(patch).length > 0) {
+                matchWithPBP = { ...match, ...patch };
+                setMatches((current) =>
+                  current.map((m) => (m.id === match.id ? ({ ...m, ...patch } as Match) : m))
+                );
+              }
 
-            if (detailsResult.status === "rejected") {
-              console.warn(
-                `[pipeline ${entry.id}] details fetch failed (will continue without):`,
-                detailsResult.reason,
-              );
-            }
-            if (pbpResult.status === "rejected") {
-              console.warn(
-                `[pipeline ${entry.id}] PBP fetch failed (will continue without):`,
-                pbpResult.reason,
-              );
+              if (detailsResult.status === "rejected") {
+                console.warn(
+                  `[pipeline ${entry.id}] details fetch failed (will continue without):`,
+                  detailsResult.reason,
+                );
+              }
+              if (pbpResult.status === "rejected") {
+                console.warn(
+                  `[pipeline ${entry.id}] PBP fetch failed (will continue without):`,
+                  pbpResult.reason,
+                );
+              }
+            } else if (match.sport === "football") {
+              // v1.5 MVP: football enrich is a no-op (events/stats not
+              // yet consumed by generate.ts). Hook reserved for v1.6.
             }
           } catch (err) {
             // eslint-disable-next-line no-console
@@ -781,6 +958,8 @@ export function AppProvider({ children }: { children: ReactNode }) {
 
         // ─── Step 5: finalize ───────────────────────────────────────
         const winner = getMatchWinner(matchWithPBP);
+        // Sport-aware winner name. The dispatch uses `match.sport` so
+        // tennis → player1/player2.fullName, football → home/away.name.
         const winnerName = matchWithPBP.sport === "tennis"
           ? (winner === 1
               ? (matchWithPBP as TennisMatch).player1.fullName
@@ -889,13 +1068,34 @@ export function AppProvider({ children }: { children: ReactNode }) {
           return current;
         }
         const id = uid();
+        const side1Name = match.sport === "tennis"
+          ? (match as TennisMatch).player1.fullName
+          : match.sport === "football"
+          ? (match as { home: { name: string } }).home.name
+          : "—";
+        const side2Name = match.sport === "tennis"
+          ? (match as TennisMatch).player2.fullName
+          : match.sport === "football"
+          ? (match as { away: { name: string } }).away.name
+          : "—";
+        const side1Flag = match.sport === "tennis"
+          ? (match as TennisMatch).player1.countryFlag
+          : match.sport === "football"
+          ? (match as { home: { countryFlag: string } }).home.countryFlag
+          : "";
+        const side2Flag = match.sport === "tennis"
+          ? (match as TennisMatch).player2.countryFlag
+          : match.sport === "football"
+          ? (match as { away: { countryFlag: string } }).away.countryFlag
+          : "";
         const entry: WatchlistEntry = {
           id,
+          sport: match.sport,
           matchApiId: match.id,
-          player1Name: match.player1.fullName,
-          player2Name: match.player2.fullName,
-          player1Flag: match.player1.countryFlag,
-          player2Flag: match.player2.countryFlag,
+          side1Name,
+          side2Name,
+          side1Flag,
+          side2Flag,
           tournamentName: match.tournamentName,
           tournamentCategory: match.tournamentCategory,
           matchDate: selectedDate,
@@ -907,10 +1107,14 @@ export function AppProvider({ children }: { children: ReactNode }) {
         isNewlyAdded = true;
         return [entry, ...current];
       });
-      // Trigger 2: sport-aware enrich (tennis only for v1.5).
-      const tennisMatch2 = match.sport === "tennis" ? (match as TennisMatch) : null;
-      const needsTennisEnrich = tennisMatch2
-        ? !tennisMatch2.sets || tennisMatch2.sets.length === 0 || !(match as TennisMatch).pointByPoint
+      // Trigger 2: if the match is already completed and was just added to
+      // the watchlist, fire the enrich fetch immediately. (For live/scheduled
+      // matches, the useEffect above will catch the transition later.)
+      // Sport-aware: tennis needs sets + PBP; football v1.5 MVP needs no
+      // additional enrich (events come from list-by-date, not /details).
+      const tennisMatch = match.sport === "tennis" ? (match as TennisMatch) : null;
+      const needsTennisEnrich = tennisMatch
+        ? !tennisMatch.sets || tennisMatch.sets.length === 0 || !(match as TennisMatch).pointByPoint
         : false;
       if (
         isNewlyAdded &&

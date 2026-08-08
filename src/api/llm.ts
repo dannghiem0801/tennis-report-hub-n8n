@@ -259,7 +259,7 @@ async function callAnthropicInner(opts: CallLLMOptions): Promise<CallLLMResult> 
   }
   // In dev, rewrite non-localhost baseUrls to /llm-proxy so the Vite
   // dev server proxies them (no CORS). In production, call directly.
-  const baseUrl = resolveDevProxyUrl(rawBaseUrl);
+  const baseUrl = resolveBaseUrl(rawBaseUrl);
   const url = `${baseUrl}/v1/messages`;
 
   // Loud diagnostic so we can confirm the dev proxy is firing
@@ -573,7 +573,7 @@ async function callOpenAICompatible(opts: CallLLMOptions): Promise<CallLLMResult
   const rawBaseUrl = (config.baseUrl ?? OPENAI_COMPATIBLE_DEFAULT_BASE_URL).trim().replace(/\/+$/, "");
   // In dev, rewrite non-localhost baseUrls to /llm-proxy so the Vite
   // dev server proxies them (no CORS). In production, call directly.
-  const baseUrl = resolveDevProxyUrl(rawBaseUrl);
+  const baseUrl = resolveBaseUrl(rawBaseUrl);
   const url = `${baseUrl}/chat/completions`;
 
   const requestId = `oai-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 6)}`;
@@ -708,29 +708,42 @@ function anySignal(signals: AbortSignal[]): AbortSignal {
 }
 
 /**
- * Decide whether to route the baseUrl through the Vite dev proxy
- * (`/llm-proxy/*` → real upstream) or call it directly.
+ * Decide how to route the baseUrl.
  *
- * We use TWO signals to detect dev mode — `import.meta.env.DEV` (Vite's
- * standard) AND the current `window.location.hostname` being localhost
- * / 127.0.0.1. The hostname check is a safety net for cases where
- * the user has a cached production build open in a tab pointed at
- * localhost (where `import.meta.env.DEV` is `false` but the proxy is
- * still available at `/llm-proxy`). Either signal being true triggers
- * the proxy rewrite.
+ *   DEV (Vite dev server OR a stale prod build open on localhost)
+ *     → "/llm-proxy"
+ *       Vite strips `/llm-proxy` and forwards to the real upstream.
+ *       No CORS because the browser sees only localhost.
  *
- * Localhost upstreams (Ollama, LM Studio, llama.cpp) are passed through
- * unchanged — they're already same-origin or CORS-friendly.
+ *   PROD (deployed build, non-localhost)
+ *     → "/api/llm"
+ *       Vercel serverless function at `api/llm/v1/messages.ts`
+ *       forwards to the upstream. Same-origin from the browser's
+ *       perspective — no CORS preflight. We need this because the
+ *       upstream (e.g. `api.minimax.io`) does not send
+ *       `Access-Control-Allow-Origin` for our deployed domain.
+ *
+ * Two signals detect dev mode — `import.meta.env.DEV` (Vite's
+ * standard) AND `window.location.hostname` being localhost. The
+ * hostname check is a safety net for cases where a cached prod
+ * build is open in a localhost tab (DEV is false but the Vite
+ * proxy is still available at `/llm-proxy`).
+ *
+ * Localhost upstreams (Ollama, LM Studio, llama.cpp) are passed
+ * through unchanged in BOTH dev and prod — they're already
+ * same-origin or CORS-friendly.
  *
  * Examples:
- *   resolveDevProxyUrl("https://api.minimax.io/anthropic")  on localhost:5173
+ *   resolveBaseUrl("https://api.minimax.io/anthropic")  on localhost:5173
  *     → "/llm-proxy"
- *   resolveDevProxyUrl("http://localhost:11434/v1")          on localhost:5173
+ *   resolveBaseUrl("http://localhost:11434/v1")          on localhost:5173
  *     → "http://localhost:11434/v1"   (passthrough — local LLM)
- *   resolveDevProxyUrl("https://api.openai.com/v1")         on prod build
- *     → "https://api.openai.com/v1"  (no proxy in production)
+ *   resolveBaseUrl("https://api.minimax.io/anthropic")  on prod build
+ *     → "/api/llm"   (Vercel serverless forwards to upstream)
+ *   resolveBaseUrl("http://localhost:11434/v1")          on prod build
+ *     → "http://localhost:11434/v1"   (passthrough — local LLM)
  */
-function resolveDevProxyUrl(baseUrl: string): string {
+function resolveBaseUrl(baseUrl: string): string {
   // Signal 1: Vite's standard dev flag (works in normal Vite dev).
   const viteDev =
     typeof import.meta !== "undefined" && (import.meta as { env?: { DEV?: boolean } }).env?.DEV === true;
@@ -748,9 +761,9 @@ function resolveDevProxyUrl(baseUrl: string): string {
   }
 
   const inDev = viteDev || onLocalhost;
-  if (!inDev) return baseUrl;
 
   // Localhost upstreams: passthrough (Ollama, LM Studio, llama.cpp).
+  // They're already same-origin or CORS-friendly from a real browser.
   try {
     const u = new URL(baseUrl);
     const host = u.hostname.toLowerCase();
@@ -758,11 +771,11 @@ function resolveDevProxyUrl(baseUrl: string): string {
       return baseUrl;
     }
   } catch {
-    // Not a parseable URL — fall through and rewrite to proxy.
+    // Not a parseable URL — fall through.
   }
 
-  // Route non-localhost upstreams through the Vite dev proxy.
-  return "/llm-proxy";
+  // Dev: route through Vite proxy. Prod: route through Vercel serverless.
+  return inDev ? "/llm-proxy" : "/api/llm";
 }
 
 // =====================================================================

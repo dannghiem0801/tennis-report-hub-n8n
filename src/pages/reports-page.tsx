@@ -36,11 +36,17 @@ export function ReportsPage() {
     let list = reports.filter((r) => {
       if (filterTournament !== "all" && r.match.tournamentName !== filterTournament) return false;
       if (!q) return true;
+      // Sport-aware name search. Tennis: player1/player2.fullName.
+      // Football: home/away.name. Discriminated union.
+      const names = r.match.sport === "football"
+        ? [(r.match as { home: { name: string } }).home.name, (r.match as { away: { name: string } }).away.name]
+        : r.match.sport === "tennis"
+        ? [(r.match as { player1: { fullName: string } }).player1.fullName, (r.match as { player2: { fullName: string } }).player2.fullName]
+        : [];
       return (
         r.title.toLowerCase().includes(q) ||
         r.content.toLowerCase().includes(q) ||
-        r.match.player1.fullName.toLowerCase().includes(q) ||
-        r.match.player2.fullName.toLowerCase().includes(q)
+        names.some((n) => n.toLowerCase().includes(q))
       );
     });
     list = list.sort((a, b) => {
@@ -174,7 +180,13 @@ export function ReportsPage() {
                       {formatFinalScore(match)}
                     </span>
                     <span>•</span>
-                    <span className="truncate">{match.player1.name} vs {match.player2.name}</span>
+                    <span className="truncate">
+                      {match.sport === "football"
+                        ? `${(match as { home: { name: string } }).home.name} vs ${(match as { away: { name: string } }).away.name}`
+                        : match.sport === "tennis"
+                        ? `${(match as { player1: { name: string } }).player1.name} vs ${(match as { player2: { name: string } }).player2.name}`
+                        : "—"}
+                    </span>
                   </div>
 
                   <div className="mt-auto flex items-center gap-1.5 pt-3">

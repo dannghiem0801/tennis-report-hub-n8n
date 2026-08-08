@@ -1,0 +1,11 @@
+# Build artifacts
+dist/
+node_modules/
+.vite/
+
+# Worktrees — don't deploy nested git checkouts
+.worktrees/
+
+# Test artifacts
+*.log
+.DS_Store

@@ -18,10 +18,10 @@
 import * as React from "react";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { cn } from "@/lib/utils";
-import type { Match, PointByPointData, PointByPointGame, PointByPointSet, TennisMatch } from "@/types";
+import type { PointByPointData, PointByPointGame, PointByPointSet, TennisMatch } from "@/types";
 
-export function PointByPointViewer({ match }: { match: Match }) {
-  const pbp: PointByPointData | undefined = (match as TennisMatch).pointByPoint;
+export function PointByPointViewer({ match }: { match: TennisMatch }) {
+  const pbp = match.pointByPoint;
   if (!pbp || pbp.sets.length === 0) return null;
 
   return (
@@ -72,7 +72,7 @@ function SetView({
   isLastSet,
 }: {
   set: PointByPointSet;
-  match: Match;
+  match: TennisMatch;
   isLastSet: boolean;
 }) {
   return (
@@ -277,12 +277,11 @@ function PointSequence({ seq }: { seq: string }) {
 /* ------------------------------------------------------------------ */
 
 function FinalBanner({ match }: { match: TennisMatch }) {
-  // use destructuring to access side1/side2
-  const { side1: setsWonSide1, side2: setsWonSide2 } = (match as TennisMatch).setsWon || {};
-  const p1Sets: number = setsWonSide1 ?? 0;
-  const p2Sets: number = setsWonSide2 ?? 0;
-  const p1Initial = ((match as TennisMatch).player1.fullName || "?").trim().charAt(0).toUpperCase() || "?";
-  const p2Initial = ((match as TennisMatch).player2.fullName || "?").trim().charAt(0).toUpperCase() || "?";
+  const setsWon = match.setsWon;
+  const p1Sets = setsWon?.side1 ?? 0;
+  const p2Sets = setsWon?.side2 ?? 0;
+  const p1Initial = (match.player1.fullName || "?").trim().charAt(0).toUpperCase() || "?";
+  const p2Initial = (match.player2.fullName || "?").trim().charAt(0).toUpperCase() || "?";
 
   return (
     <div className="flex items-center justify-center gap-6 border-t border-slate-800 bg-slate-900/30 px-4 py-5">

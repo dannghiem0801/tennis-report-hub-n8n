@@ -2,6 +2,11 @@ export type Sport = "tennis" | "football" | "basketball";
 
 export type MatchStatus = "scheduled" | "live" | "completed";
 
+/**
+ * Tennis tournament tier. Mirrors the categories that flashscore4
+ * returns in the `category` / `name` field of the list-by-date
+ * response. Doubles events are filtered upstream; this is singles only.
+ */
 export type TennisTournamentCategory =
   | "ATP Masters 1000"
   | "ATP 500"
@@ -13,6 +18,12 @@ export type TennisTournamentCategory =
   | "Challenger"
   | "ITF";
 
+/**
+ * Football tournament tier. Coarse groupings — flashscore4 returns
+ * league names like "Premier League" or "Champions League" in the
+ * tournament `name`; we map them into these categories for sorting
+ * and badge rendering. The mapping is in `flashscore-mapper.ts`.
+ */
 export type FootballTournamentCategory =
   | "World Cup"
   | "Continental Championship"
@@ -25,8 +36,14 @@ export type FootballTournamentCategory =
   | "V-League"
   | "Friendly";
 
+/** Sport-aware tournament category. Tennis vs football differ. */
 export type TournamentCategory = TennisTournamentCategory | FootballTournamentCategory;
 
+/**
+ * A participant in a Match. Discriminated union by `kind`.
+ *   - "player" (tennis): name, fullName, country, flag, ranking?, seed?
+ *   - "team"   (football): name, shortName, country, flag, logoUrl?
+ */
 export type Participant =
   | {
       kind: "player";
@@ -46,6 +63,7 @@ export type Participant =
       logoUrl?: string;
     };
 
+/** Generic score: side1 vs side2. Tennis = sets, football = goals. */
 export interface ScoreLine {
   side1: number;
   side2: number;
@@ -57,6 +75,7 @@ export interface SetScore {
   tiebreak?: { player1: number; player2: number };
 }
 
+/** Tennis stats (sourced from /matches/details endpoint). */
 export interface TennisMatchStats {
   aces: { player1: number; player2: number };
   doubleFaults: { player1: number; player2: number };
@@ -67,6 +86,7 @@ export interface TennisMatchStats {
   matchDurationMinutes: number;
 }
 
+/** Football stats (sourced from /matches/details). */
 export interface FootballMatchStats {
   possession?: { home: number; away: number };
   shots?: { home: number; away: number };
@@ -109,6 +129,10 @@ export interface FootballEvents {
   subs: SubEvent[];
 }
 
+/**
+ * Sub-state of a completed match. Determines whether a Report is
+ * generated. See glossary in CONTEXT.md for full list.
+ */
 export type MatchOutcome =
   | "normal"
   | "aet"
@@ -118,6 +142,7 @@ export type MatchOutcome =
   | "cancelled"
   | "abandoned";
 
+/** Common core for all Match variants. */
 interface CommonMatchFields {
   id: string;
   sport: Sport;
@@ -155,6 +180,7 @@ export interface FootballMatch extends CommonMatchFields {
   referee?: string;
 }
 
+/** Discriminated union of all Match variants. */
 export type Match = TennisMatch | FootballMatch;
 
 export interface PointByPointGame {
@@ -196,6 +222,7 @@ export type WatchlistStatus =
   | "completed"
   | "failed";
 
+/** Generic display row. side1/side2 = player or team depending on sport. */
 export interface WatchlistEntry {
   id: string;
   sport: Sport;
@@ -296,6 +323,7 @@ export interface Settings {
   timezone: string;
   notificationsEnabled: boolean;
   llm?: LLMConfig;
+  /** @deprecated No longer used. */
   useSampleDataOverride?: boolean;
 }
 

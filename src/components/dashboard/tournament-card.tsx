@@ -139,7 +139,7 @@ function surfaceLabel(s: Tournament["surface"]): string {
     case "grass":
       return "Sàn cỏ";
     default:
-      return s;
+      return s ?? "—";
   }
 }
 
