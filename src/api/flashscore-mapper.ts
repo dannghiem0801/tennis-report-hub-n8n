@@ -72,7 +72,6 @@ import type {
   Participant,
   PointByPointData,
   PointByPointGame,
-  ScoreLine,
   SetScore,
   Sport,
   TennisMatchStats,
@@ -83,9 +82,6 @@ import { flagFromAlpha2 } from "./country-flags";
 
 /** Local alias for the tennis player shape. */
 type Player = Extract<Participant, { kind: "player" }>;
-
-/** Local alias — TennisMatchStats is the new name (was MatchStats). */
-type MatchStats = TennisMatchStats;
 
 /* ------------------------------------------------------------------ */
 /*  Field extractors                                                   */
