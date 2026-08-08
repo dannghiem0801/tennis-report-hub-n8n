@@ -214,9 +214,16 @@ export function AppProvider({ children }: { children: ReactNode }) {
   // Active sport (single key, persisted). Initial value from localStorage.
   const [activeSport, setActiveSportInternal] = useState<Sport>(() => storage.getActiveSport());
 
-  // user data — per-sport, loaded for the active sport.
-  const [watchlist, setWatchlist] = useState<WatchlistEntry[]>(() => storage.getWatchlist(activeSport));
-  const [reports, setReports] = useState<Report[]>(() => storage.getReports(activeSport));
+  // user data — per-sport (templates) and unified (everything else).
+  //
+  // Per ADR 0003, watchlist / reports / scheduled batches are unified
+  // across all sports and do NOT swap on active-sport change. The
+  // unified storage methods aggregate per-sport localStorage keys so
+  // existing data is preserved (no migration needed). Only templates
+  // remain per-sport (they encode sport-specific prompt structure)
+  // and the dashboard match list.
+  const [watchlist, setWatchlist] = useState<WatchlistEntry[]>(() => storage.getUnifiedWatchlist());
+  const [reports, setReports] = useState<Report[]>(() => storage.getUnifiedReports());
   const [templates, setTemplates] = useState<ReportTemplate[]>(() => {
     const saved = storage.getTemplates(activeSport);
     if (saved.length > 0) {
@@ -239,31 +246,24 @@ export function AppProvider({ children }: { children: ReactNode }) {
     // the new default. The user can switch back via Settings.
     return { ...saved, llm: migrateLLMConfig(saved.llm) };
   });
-  const [seenReportIds, setSeenReportIds] = useState<string[]>(() => storage.getSeenReportIds(activeSport));
+  const [seenReportIds, setSeenReportIds] = useState<string[]>(() => storage.getUnifiedSeenReportIds());
   const [scheduledBatches, setScheduledBatches] = useState<ScheduledBatch[]>(() =>
-    storage.getScheduledBatches(activeSport)
+    storage.getUnifiedScheduledBatches()
   );
 
   /**
-   * Switch active sport. Triggers:
-   *  1. Persist new sport to localStorage.
-   *  2. Reload watchlist / reports / templates / scheduled batches /
-   *     seen-reports from the per-sport storage key.
-   *  3. Clear in-flight matches (the old sport's data shouldn't show
-   *     for the new sport) and trigger a refetch via the date effect
-   *     when `selectedDate` changes — but we don't change the date
-   *     on sport switch, so we kick a manual refetch via the
-   *     `selectedDateKeyRef` pattern.
+   * Switch active sport. Per ADR 0003, the active sport is a
+   * **dashboard filter only** — it controls which sport's fixtures
+   * the tournament browser shows. Watchlist / reports / scheduled
+   * batches are sport-agnostic and do NOT swap. Templates stay
+   * per-sport (different prompts per sport) and reload on switch.
    */
   const setActiveSport = useCallback((sport: Sport) => {
     setActiveSportInternal((current) => {
       if (current === sport) return current;
       storage.setActiveSport(sport);
-      // Reload per-sport data in one batch.
-      setWatchlist(storage.getWatchlist(sport));
-      setReports(storage.getReports(sport));
-      setSeenReportIds(storage.getSeenReportIds(sport));
-      setScheduledBatches(storage.getScheduledBatches(sport));
+      // Templates are per-sport (per ADR 0003). Reload for the new
+      // sport; fall back to bundled defaults if first run.
       const tpl = storage.getTemplates(sport);
       if (tpl.length > 0) {
         setTemplates(tpl);
@@ -272,12 +272,11 @@ export function AppProvider({ children }: { children: ReactNode }) {
         storage.setTemplates(sport, bundled);
         setTemplates(bundled);
       }
-      // Clear in-flight matches to avoid flashing old-sport data.
+      // Clear the dashboard so we don't briefly show the previous
+      // sport's matches while the new fetch is in flight.
       setMatches([]);
       setTournaments([]);
       // Trigger a refetch for the new sport at the current date.
-      // The fetchMatches effect re-runs because `activeSport` is a
-      // dependency (we add it to its callback deps).
       sportSwitchRef.current += 1;
       return sport;
     });
@@ -312,13 +311,14 @@ export function AppProvider({ children }: { children: ReactNode }) {
   const [isDateAutoPicked, setIsDateAutoPicked] = useState(false);
   const [userSelectedDate, setUserSelectedDate] = useState<string>(() => formatDateKey(new Date()));
 
-  // persist (per-sport for entity data; settings is shared)
-  useEffect(() => storage.setWatchlist(activeSport, watchlist), [watchlist, activeSport]);
-  useEffect(() => storage.setReports(activeSport, reports), [reports, activeSport]);
+  // persist (unified for watchlist / reports / batches; per-sport for
+  // templates; shared for settings). Per ADR 0003.
+  useEffect(() => storage.setUnifiedWatchlist(watchlist), [watchlist]);
+  useEffect(() => storage.setUnifiedReports(reports), [reports]);
   useEffect(() => storage.setTemplates(activeSport, templates), [templates, activeSport]);
   useEffect(() => storage.setSettings(settings), [settings]);
-  useEffect(() => storage.setSeenReportIds(activeSport, seenReportIds), [seenReportIds, activeSport]);
-  useEffect(() => storage.setScheduledBatches(activeSport, scheduledBatches), [scheduledBatches, activeSport]);
+  useEffect(() => storage.setUnifiedSeenReportIds(seenReportIds), [seenReportIds]);
+  useEffect(() => storage.setUnifiedScheduledBatches(scheduledBatches), [scheduledBatches]);
 
   // fetch matches
   // Use a ref to read current matches length without re-creating this callback
@@ -544,6 +544,145 @@ export function AppProvider({ children }: { children: ReactNode }) {
       }
     };
   }, [settings.pollingIntervalMinutes, selectedDate, fetchMatches, isRateLimited]);
+
+  // Per-entry background poll (ADR 0003 — cross-sport completion
+  // detection). The dashboard fast-path only fires for entries
+  // whose match is in the current `matches` array (i.e. active
+  // sport, selected date). For cross-sport and cross-date entries
+  // we need a separate poll.
+  //
+  // Batched by `(sport, date)`: pending entries are grouped, each
+  // unique pair is fetched once per cycle, and the 30-min cache
+  // in `flashscore.ts` (`TTL.listByDate`) dedupes. So 10 pending
+  // entries across 3 dates = 3 API calls, not 10.
+  //
+  // Shares `pollingIntervalMinutes` with the dashboard poll
+  // (single knob). Skipped when rate-limited or when polling is
+  // disabled (interval === 0).
+  //
+  // On completion detection: transitions the entry from
+  // `pending` to `fetching-pbp` — same transition the dashboard
+  // fast-path uses. The runGeneration pipeline picks it up and
+  // runs the LLM regardless of `activeSport`.
+  const perEntryPollRef = useRef<number | null>(null);
+  const perEntryPollInFlightRef = useRef<boolean>(false);
+  const watchlistRef = useRef<WatchlistEntry[]>(watchlist);
+  useEffect(() => {
+    watchlistRef.current = watchlist;
+  }, [watchlist]);
+  // Stable key over the set of pending entries. Recomputes only
+  // when the set changes (add/remove/transition), not on every
+  // watchlist mutation.
+  const pendingPollKey = useMemo(() => {
+    return watchlist
+      .filter((e) => e.status === "pending")
+      .map((e) => `${e.id}|${e.sport}|${e.matchDate}|${e.matchApiId}`)
+      .sort()
+      .join(",");
+  }, [watchlist]);
+
+  useEffect(() => {
+    if (perEntryPollRef.current) {
+      window.clearInterval(perEntryPollRef.current);
+      perEntryPollRef.current = null;
+    }
+    if (isRateLimited) return;
+    if (settings.pollingIntervalMinutes === 0) return;
+    if (!settings.rapidApiKey?.trim()) return;
+
+    const apiKey = settings.rapidApiKey.trim();
+
+    const tick = async () => {
+      if (perEntryPollInFlightRef.current) return;
+      perEntryPollInFlightRef.current = true;
+      try {
+        // Snapshot the current pending entries via the ref so
+        // the closure doesn't go stale.
+        const pending = watchlistRef.current.filter(
+          (e) => e.status === "pending"
+        );
+        if (pending.length === 0) return;
+
+        // Group by (sport, date). Each unique pair is fetched once.
+        const byPair = new Map<string, WatchlistEntry[]>();
+        for (const entry of pending) {
+          const key = `${entry.sport}|${entry.matchDate}`;
+          const list = byPair.get(key);
+          if (list) list.push(entry);
+          else byPair.set(key, [entry]);
+        }
+
+        for (const [key, entries] of byPair) {
+          const [sport, date] = key.split("|") as [Sport, string];
+          const sportId = SPORT_ID_MAP[sport];
+          if (!sportId) continue;
+          try {
+            const payload = await getMatchesByDate({
+              apiKey,
+              sportId,
+              date,
+              timezone: APP_TIMEZONE,
+            });
+            const { matches: matched } = mapMatchesBatch({
+              payload,
+              dateKey: date,
+              sport,
+            });
+            const completedIds = new Set(
+              matched
+                .filter((m) => m.status === "completed")
+                .map((m) => m.id)
+            );
+            if (completedIds.size === 0) continue;
+            const toTrigger = entries.filter((e) =>
+              completedIds.has(e.matchApiId)
+            );
+            if (toTrigger.length === 0) continue;
+            const triggerIds = new Set(toTrigger.map((e) => e.id));
+            const now = new Date().toISOString();
+            setWatchlist((current) => {
+              let changed = false;
+              const updated = current.map((e) => {
+                if (!triggerIds.has(e.id)) return e;
+                if (e.status !== "pending") return e;
+                changed = true;
+                return {
+                  ...e,
+                  status: "fetching-pbp" as const,
+                  pipelineStartedAt: now,
+                };
+              });
+              return changed ? updated : current;
+            });
+          } catch {
+            // Silent fail — the next tick retries. Rate-limit
+            // errors propagate through the global listener and
+            // pause future ticks via the `isRateLimited` gate.
+          }
+        }
+      } finally {
+        perEntryPollInFlightRef.current = false;
+      }
+    };
+
+    const ms = Math.max(1, settings.pollingIntervalMinutes) * 60 * 1000;
+    // Fire one tick immediately so newly-added entries get
+    // checked without waiting `ms` for the first interval.
+    void tick();
+    perEntryPollRef.current = window.setInterval(tick, ms);
+    return () => {
+      if (perEntryPollRef.current) {
+        window.clearInterval(perEntryPollRef.current);
+        perEntryPollRef.current = null;
+      }
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [
+    settings.pollingIntervalMinutes,
+    settings.rapidApiKey,
+    isRateLimited,
+    pendingPollKey,
+  ]);
 
   // Lazily enrich watchlist matches with per-set details + point-by-point.
   //

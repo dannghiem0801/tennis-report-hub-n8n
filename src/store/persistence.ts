@@ -227,4 +227,77 @@ export const storage = {
   setActiveSport(sport: Sport): void {
     write(KEYS.activeSport, sport);
   },
+
+  // Unified (sport-agnostic) accessors (ADR 0003). The per-sport
+  // methods above remain the source of truth in localStorage; these
+  // helpers aggregate them so the watchlist / reports / batches are
+  // presented as a single sport-agnostic collection to the UI.
+  // Writes split the input by `sport` and route each subset to the
+  // corresponding per-sport key.
+  getUnifiedWatchlist(): WatchlistEntry[] {
+    return [
+      ...storage.getWatchlist("tennis"),
+      ...storage.getWatchlist("football"),
+      ...storage.getWatchlist("basketball"),
+    ];
+  },
+  setUnifiedWatchlist(items: WatchlistEntry[]): void {
+    const by: Record<Sport, WatchlistEntry[]> = {
+      tennis: [],
+      football: [],
+      basketball: [],
+    };
+    for (const entry of items) by[entry.sport].push(entry);
+    storage.setWatchlist("tennis", by.tennis);
+    storage.setWatchlist("football", by.football);
+    storage.setWatchlist("basketball", by.basketball);
+  },
+  getUnifiedReports(): Report[] {
+    return [
+      ...storage.getReports("tennis"),
+      ...storage.getReports("football"),
+      ...storage.getReports("basketball"),
+    ];
+  },
+  setUnifiedReports(items: Report[]): void {
+    const by: Record<Sport, Report[]> = { tennis: [], football: [], basketball: [] };
+    for (const r of items) by[r.sport].push(r);
+    storage.setReports("tennis", by.tennis);
+    storage.setReports("football", by.football);
+    storage.setReports("basketball", by.basketball);
+  },
+  getUnifiedSeenReportIds(): string[] {
+    return [
+      ...storage.getSeenReportIds("tennis"),
+      ...storage.getSeenReportIds("football"),
+      ...storage.getSeenReportIds("basketball"),
+    ];
+  },
+  setUnifiedSeenReportIds(ids: string[]): void {
+    // seenIds are a flat set across all sports (they reference report
+    // ids which are unique globally because the watchlist id is also
+    // unique globally). So we can write the full set to each per-sport
+    // key; the read on any sport returns the merged set.
+    storage.setSeenReportIds("tennis", ids);
+    storage.setSeenReportIds("football", ids);
+    storage.setSeenReportIds("basketball", ids);
+  },
+  getUnifiedScheduledBatches(): ScheduledBatch[] {
+    return [
+      ...storage.getScheduledBatches("tennis"),
+      ...storage.getScheduledBatches("football"),
+      ...storage.getScheduledBatches("basketball"),
+    ];
+  },
+  setUnifiedScheduledBatches(batches: ScheduledBatch[]): void {
+    const by: Record<Sport, ScheduledBatch[]> = {
+      tennis: [],
+      football: [],
+      basketball: [],
+    };
+    for (const b of batches) by[b.sport].push(b);
+    storage.setScheduledBatches("tennis", by.tennis);
+    storage.setScheduledBatches("football", by.football);
+    storage.setScheduledBatches("basketball", by.basketball);
+  },
 };
