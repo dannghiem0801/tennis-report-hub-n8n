@@ -1,1 +1,13 @@
-{"projectId":"prj_zyhD0KGF5xH7A9YJxvS05RQyVdjL","orgId":"team_2AERAyMqaf5au9NExPYmf186","projectName":"tennis-report-hub"}
+{
+  "settings": {
+    "createdAt": 1785765807955,
+    "framework": "vite",
+    "devCommand": null,
+    "installCommand": null,
+    "buildCommand": "npm run build",
+    "outputDirectory": "dist",
+    "rootDirectory": null,
+    "directoryListing": false,
+    "nodeVersion": "24.x"
+  }
+}

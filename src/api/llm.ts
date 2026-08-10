@@ -53,7 +53,23 @@
 import type { LLMConfig } from "@/types";
 import { env } from "@/lib/env";
 
-const DEFAULT_TIMEOUT_MS = 180_000; // 3 minutes
+// 5 minutes per LLM call. The structured pipeline can run a draft +
+// a repair, so the per-call budget must accommodate a thinking model
+// on a longer prompt without aborting mid-flight. The Firecrawl pre-
+// fetch happens before any LLM call (its own internal timeouts), so
+// this number only gates the actual model invocation.
+const DEFAULT_TIMEOUT_MS = 300_000;
+
+const setTimeoutFn = (cb: () => void, ms: number): ReturnType<typeof setTimeout> => {
+  // Node exposes setTimeout as a global. In the browser, it's the
+  // same global but available under `window`. We use the globalThis
+  // lookup so this file works in both environments (Vite + tsx).
+  return (globalThis.setTimeout as typeof setTimeout)(cb, ms);
+};
+const clearTimeoutFn = (id: ReturnType<typeof setTimeout>): void => {
+  (globalThis.clearTimeout as typeof clearTimeout)(id);
+};
+
 
 // ---- Provider-specific defaults ----
 // Anthropic Messages API. The app uses the request/response shape of
@@ -166,23 +182,34 @@ export interface CallLLMOptions {
   signal?: AbortSignal;
   /** Timeout in ms. Default 180s. */
   timeoutMs?: number;
+  /** When true, skip declaring web_search/scrape_url tools. The structured
+   *  report pipeline always disables tools (evidence is pre-fetched), so
+   *  the model must answer from the prompt alone. Defaults to true. */
+  disableTools?: boolean;
 }
 
 export interface CallLLMResult {
-  /** The FULL chat completion content (no sanitization). For non-streaming
-   *  requests, this is the complete response. */
+  /** Text from the TERMINAL assistant turn only. Intermediate text
+   *  emitted alongside `tool_use` blocks is trace data and never
+   *  appears here — see `callAnthropic` for the rationale. */
   content: string;
-  /** The model's reported finish_reason. For Anthropic: "end_turn" |
-   *  "max_tokens" | "stop_sequence" | "tool_use" | "unknown". For
-   *  OpenAI-compatible: "stop" | "length" | "tool_calls" | "unknown". */
+  /** The model's reported finish_reason. `max_tokens` / `length` indicate
+   *  truncation and require repair. */
   finishReason: string;
-  /** If the model returned tool_calls in the message (not as content),
-   *  the raw array is exposed here for debugging. */
-  toolCalls?: unknown;
   /** Provider-reported usage if present. */
   usage?: { promptTokens?: number; completionTokens?: number; totalTokens?: number };
   /** Echoed for logs / debugging. */
   model: string;
+  /** Redacted observability for the safety pipeline. */
+  observability?: {
+    /** Number of model turns the loop executed before terminating. */
+    turns: number;
+    /** Total wall time including tool execution, in ms. */
+    durationMs: number;
+    /** Whether the response was a terminal text turn (true). False when
+     *  the tool loop ended with no terminal text. */
+    terminal: boolean;
+  };
 }
 
 // ---- Dispatcher ----
@@ -356,11 +383,21 @@ async function callAnthropicInner(opts: CallLLMOptions): Promise<CallLLMResult> 
 
   let totalInput = 0;
   let totalOutput = 0;
-  let allText = "";
+  // Text from the TERMINAL assistant turn only. Intermediate text
+  // emitted alongside tool_use blocks is trace data (e.g. "I'll search
+  // for…") and must never leak into the published article.
+  let terminalText = "";
+  let terminalTurnReached = false;
   let stopReason = "unknown";
   let model = config.model;
   let lastError: string | null = null;
   const maxTurns = 10;
+  // Tools are disabled by default in the structured report pipeline.
+  // Existing settings UI still exposes the toggle, so callers that
+  // want web search must opt in explicitly via `disableTools: false`.
+  const toolsAllowed = opts.disableTools === false;
+  const startedAtOuter = Date.now();
+  let turnsExecuted = 0;
 
   for (let turn = 0; turn < maxTurns; turn++) {
     const requestId = `ant-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 6)}`;
@@ -386,7 +423,7 @@ async function callAnthropicInner(opts: CallLLMOptions): Promise<CallLLMResult> 
     };
 
     const timeoutController = new AbortController();
-    const timeoutId = window.setTimeout(() => timeoutController.abort(), timeoutMs);
+    const timeoutId = setTimeoutFn(() => timeoutController.abort(), timeoutMs);
     const composedSignal = signal
       ? anySignal([signal, timeoutController.signal])
       : timeoutController.signal;
@@ -404,10 +441,10 @@ async function callAnthropicInner(opts: CallLLMOptions): Promise<CallLLMResult> 
         signal: composedSignal,
       });
     } catch (e) {
-      window.clearTimeout(timeoutId);
+      clearTimeoutFn(timeoutId);
       if (e instanceof DOMException && e.name === "AbortError") {
         if (signal?.aborted) throw new LLMError("Đã huỷ yêu cầu LLM.", 0, "network");
-        throw new LLMError("Anthropic không phản hồi trong vòng 3 phút (timeout).", 0, "timeout");
+        throw new LLMError(`Anthropic không phản hồi trong vòng ${Math.round(timeoutMs / 60_000)} phút (timeout).`, 0, "timeout");
       }
       throw new LLMError(
         "Không thể kết nối tới Anthropic. Kiểm tra base URL, network, hoặc CORS.",
@@ -415,7 +452,7 @@ async function callAnthropicInner(opts: CallLLMOptions): Promise<CallLLMResult> 
         "cors"
       );
     }
-    window.clearTimeout(timeoutId);
+    clearTimeoutFn(timeoutId);
 
     if (!res.ok) {
       let detail = "";
@@ -455,32 +492,50 @@ async function callAnthropicInner(opts: CallLLMOptions): Promise<CallLLMResult> 
     totalOutput += data.usage?.output_tokens ?? 0;
     stopReason = data.stop_reason;
 
-    // Extract text and tool_use blocks
+    // Extract text and tool_use blocks. We deliberately DO NOT append
+    // text from non-terminal turns (anything paired with tool_use) to
+    // the published content — that's process narration that belongs
+    // in observability logs, not the article body.
     const toolUseBlocks: AnthropicToolUseBlock[] = [];
+    let turnText = "";
     for (const block of data.content) {
       if (block.type === "text") {
-        allText += (block as AnthropicTextBlock).text ?? "";
+        turnText += (block as AnthropicTextBlock).text ?? "";
       } else if (block.type === "tool_use") {
         toolUseBlocks.push(block as AnthropicToolUseBlock);
       }
     }
+    turnsExecuted = turn + 1;
 
     // eslint-disable-next-line no-console
     console.log(
       `[llm] [${requestId}] ← turn ${turn + 1} in ${((Date.now() - startedAt) / 1000).toFixed(1)}s, ` +
-        `stop_reason=${stopReason}, text_so_far=${allText.length}chars, ` +
+        `stop_reason=${stopReason}, turn_text=${turnText.length}chars, ` +
         `tool_uses=${toolUseBlocks.length}, ` +
         `usage=${data.usage ? `${data.usage.input_tokens + data.usage.output_tokens} tokens (${data.usage.input_tokens}in/${data.usage.output_tokens}out)` : "n/a"}`
     );
 
     // If no tool_use, the model is done (or truncated)
+    // The text from this turn becomes the published article — anything
+    // seen earlier alongside tool_use blocks is discarded.
     if (data.stop_reason === "end_turn" || data.stop_reason === "stop_sequence" || data.stop_reason === "max_tokens") {
+      terminalText = turnText;
+      terminalTurnReached = true;
       break;
     }
 
     // Model wants to call a tool — execute each call client-side and
     // send back `tool_result` blocks with the actual result content.
     if (data.stop_reason === "tool_use" && toolUseBlocks.length > 0) {
+      if (!toolsAllowed) {
+        // Tools disabled but the model tried to use one. Treat the
+        // turn's text as terminal and bail out — the validator must
+        // catch the process narration.
+        terminalText = turnText;
+        terminalTurnReached = true;
+        lastError = "tools_disabled_but_model_requested_tool";
+        break;
+      }
       // Append the assistant's full content (text + tool_use blocks,
       // including any thinking blocks) so the conversation has the
       // right context per the spec.
@@ -518,12 +573,14 @@ async function callAnthropicInner(opts: CallLLMOptions): Promise<CallLLMResult> 
 
     // Unknown stop_reason — break to avoid infinite loop
     lastError = `unexpected stop_reason: ${data.stop_reason}`;
+    terminalText = turnText;
+    terminalTurnReached = true;
     break;
   }
 
-  if (allText.length === 0) {
+  if (!terminalTurnReached || terminalText.length === 0) {
     throw new LLMError(
-      `Anthropic trả về response rỗng. ${lastError ?? ""}`.trim(),
+      `Anthropic trả về response rỗng sau ${maxTurns} turn. ${lastError ?? ""}`.trim(),
       200,
       "no_data"
     );
@@ -533,25 +590,30 @@ async function callAnthropicInner(opts: CallLLMOptions): Promise<CallLLMResult> 
     // eslint-disable-next-line no-console
     console.warn(
       `[llm] Anthropic response TRUNCATED at max_tokens (${config.maxTokens ?? ANTHROPIC_DEFAULT_MAX_TOKENS}). ` +
-        `Increase "Max tokens" in Settings.`
+        `The validator must repair or reject this draft.`
     );
   }
-  if (allText.length < 200) {
+  if (terminalText.length < 200) {
     // eslint-disable-next-line no-console
     console.warn(
-      `[llm] Anthropic response is suspiciously short (${allText.length} chars). ` +
-        `First 200: ${JSON.stringify(allText.slice(0, 200))}`
+      `[llm] Anthropic response is suspiciously short (${terminalText.length} chars). ` +
+        `First 200: ${JSON.stringify(terminalText.slice(0, 200))}`
     );
   }
 
   return {
-    content: allText,
+    content: terminalText,
     model,
     finishReason: stopReason,
     usage: {
       promptTokens: totalInput || undefined,
       completionTokens: totalOutput || undefined,
       totalTokens: (totalInput + totalOutput) || undefined,
+    },
+    observability: {
+      turns: turnsExecuted,
+      durationMs: Date.now() - startedAtOuter,
+      terminal: terminalTurnReached,
     },
   };
 }
@@ -597,7 +659,7 @@ async function callOpenAICompatible(opts: CallLLMOptions): Promise<CallLLMResult
   );
 
   const timeoutController = new AbortController();
-  const timeoutId = window.setTimeout(() => timeoutController.abort(), timeoutMs);
+  const timeoutId = setTimeoutFn(() => timeoutController.abort(), timeoutMs);
   const composedSignal = signal
     ? anySignal([signal, timeoutController.signal])
     : timeoutController.signal;
@@ -614,14 +676,14 @@ async function callOpenAICompatible(opts: CallLLMOptions): Promise<CallLLMResult
       signal: composedSignal,
     });
   } catch (e) {
-    window.clearTimeout(timeoutId);
+    clearTimeoutFn(timeoutId);
     if (e instanceof DOMException && e.name === "AbortError") {
       if (signal?.aborted) throw new LLMError("Đã huỷ yêu cầu LLM.", 0, "network");
-      throw new LLMError("LLM không phản hồi trong vòng 3 phút (timeout).", 0, "timeout");
+      throw new LLMError(`LLM không phản hồi trong vòng ${Math.round(timeoutMs / 60_000)} phút (timeout).`, 0, "timeout");
     }
     throw new LLMError("Không thể kết nối tới LLM. Kiểm tra base URL, network, hoặc CORS.", 0, "cors");
   }
-  window.clearTimeout(timeoutId);
+  clearTimeoutFn(timeoutId);
 
   if (res.status === 401) throw new LLMError("LLM API key không hợp lệ (401).", 401, "unauthorized");
   if (res.status === 403) throw new LLMError("LLM từ chối truy cập (403).", 403, "forbidden");
@@ -644,18 +706,7 @@ async function callOpenAICompatible(opts: CallLLMOptions): Promise<CallLLMResult
   const message = choice?.message ?? {};
   const rawContent: string = typeof message.content === "string" ? message.content : "";
   const finishReason: string = choice?.finish_reason ?? "unknown";
-  const toolCalls = Array.isArray(message.tool_calls) ? message.tool_calls : undefined;
 
-  if (rawContent.length === 0 && toolCalls && toolCalls.length > 0) {
-    const prettyCalls = JSON.stringify(toolCalls, null, 2);
-    const placeholder =
-      `[LLM trả về ${toolCalls.length} tool call(s) thay vì text. Model đang cố gọi tool mà không có tool nào được khai báo trong request.\n\n` +
-      `Tool calls:\n\`\`\`json\n${prettyCalls}\n\`\`\`\n\n` +
-      `Để LLM viết được bản tin, có 2 cách:\n` +
-      `1. Dùng model hỗ trợ tool gọi qua API (vd. OpenAI với web browsing, hoặc Anthropic-compatible proxy có khai báo tools).\n` +
-      `2. Bỏ phần "web_search" / "mcp_sofascore_*" trong prompt để model không cố gọi tool nữa.`;
-    return { content: placeholder, model: data?.model ?? config.model, finishReason, toolCalls };
-  }
   if (rawContent.length === 0) {
     throw new LLMError("LLM trả về response rỗng. Kiểm tra model có hỗ trợ chat completions.", 200, "no_data");
   }
@@ -667,7 +718,6 @@ async function callOpenAICompatible(opts: CallLLMOptions): Promise<CallLLMResult
     `[llm] [${requestId}] ← HTTP 200 in ${((Date.now() - startedAt) / 1000).toFixed(1)}s, ` +
       `raw=${rawContent.length}chars, ` +
       `finish_reason=${finishReason}, ` +
-      `has_tool_calls=${!!toolCalls}, ` +
       `usage=${data?.usage ? `${data.usage.total_tokens} tokens (${data.usage.prompt_tokens}in/${data.usage.completion_tokens}out)` : "n/a"}`
   );
 
@@ -675,7 +725,6 @@ async function callOpenAICompatible(opts: CallLLMOptions): Promise<CallLLMResult
     content,
     model: data?.model ?? config.model,
     finishReason,
-    toolCalls,
     usage: data?.usage
       ? {
           promptTokens: data.usage.prompt_tokens,
@@ -683,6 +732,11 @@ async function callOpenAICompatible(opts: CallLLMOptions): Promise<CallLLMResult
           totalTokens: data.usage.total_tokens,
         }
       : undefined,
+    observability: {
+      turns: 1,
+      durationMs: Date.now() - startedAt,
+      terminal: finishReason !== "length" && finishReason !== "tool_calls",
+    },
   };
 }
 
@@ -943,13 +997,13 @@ async function executeScrapeUrl(url: string): Promise<string> {
       signal: timeoutController.signal,
     });
   } catch (e) {
-    window.clearTimeout(timeoutId);
+    clearTimeoutFn(timeoutId);
     if (e instanceof DOMException && e.name === "AbortError") {
       return `[scrape_url timeout (${(scrapeTimeoutMs / 1000).toFixed(0)}s) cho URL: ${url}. Trang có thể cần nhiều thời gian hơn để render, hoặc Firecrawl đang bị block.]`;
     }
     return `[scrape_url lỗi mạng: ${e instanceof Error ? e.message : String(e)}]`;
   }
-  window.clearTimeout(timeoutId);
+  clearTimeoutFn(timeoutId);
 
   if (!res.ok) {
     let detail = "";
@@ -1050,13 +1104,13 @@ async function runFirecrawlSearch(query: string, apiKey: string): Promise<string
       signal: timeoutController.signal,
     });
   } catch (e) {
-    window.clearTimeout(timeoutId);
+    clearTimeoutFn(timeoutId);
     if (e instanceof DOMException && e.name === "AbortError") {
       return `[Firecrawl timeout (${(searchTimeoutMs / 1000).toFixed(0)}s) cho query. Vui lòng thử lại.]`;
     }
     return `[Firecrawl lỗi mạng: ${e instanceof Error ? e.message : String(e)}. Hãy viết bài từ dữ liệu livescore.]`;
   }
-  window.clearTimeout(timeoutId);
+  clearTimeoutFn(timeoutId);
 
   if (!res.ok) {
     let detail = "";
@@ -1197,13 +1251,13 @@ async function runJsonSearch(opts: JsonSearchOptions): Promise<string> {
       signal: timeoutController.signal,
     });
   } catch (e) {
-    window.clearTimeout(timeoutId);
+    clearTimeoutFn(timeoutId);
     if (e instanceof DOMException && e.name === "AbortError") {
       return `[${opts.providerName} timeout (${(opts.timeoutMs / 1000).toFixed(0)}s) cho query. Vui lòng thử lại.]`;
     }
     return `[${opts.providerName} lỗi mạng: ${e instanceof Error ? e.message : String(e)}. Hãy viết bài từ dữ liệu livescore.]`;
   }
-  window.clearTimeout(timeoutId);
+  clearTimeoutFn(timeoutId);
 
   if (!res.ok) {
     let detail = "";
@@ -1263,13 +1317,13 @@ async function runDuckDuckGoSearch(query: string): Promise<string> {
       signal: timeoutController.signal,
     });
   } catch (e) {
-    window.clearTimeout(timeoutId);
+    clearTimeoutFn(timeoutId);
     if (e instanceof DOMException && e.name === "AbortError") {
       return `[DuckDuckGo timeout (${(searchTimeoutMs / 1000).toFixed(0)}s). Hãy thử lại hoặc cấu hình SerpAPI/Brave trong Settings.]`;
     }
     return `[DuckDuckGo lỗi mạng: ${e instanceof Error ? e.message : String(e)}. Hãy viết bài từ dữ liệu livescore.]`;
   }
-  window.clearTimeout(timeoutId);
+  clearTimeoutFn(timeoutId);
 
   if (!res.ok) {
     return `[DuckDuckGo HTTP ${res.status}. Hãy viết bài từ dữ liệu livescore hoặc cấu hình SerpAPI/Brave trong Settings.]`;

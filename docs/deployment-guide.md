@@ -79,7 +79,41 @@ SPA fallback (so client-side routes work after a hard refresh):
 3. Build command: `npm run build` (Vercel detects this).
 4. Output directory: `dist`.
 
-Vercel handles SPA fallback by default. No config file needed.
+Keep the tracked `vercel.json`: it sends client-side routes to `index.html`, preserves `/api/*` and static assets, and rewrites `/api/flashscore/*` to the Flashscore function.
+
+#### Verified project topology (2026-08-10)
+
+The canonical deployment is the Git-linked Vercel project. At verification time, local `main` and the deployed commit were both `eff256e`.
+
+| Setting | Canonical value |
+| --- | --- |
+| Local link | `.vercel/repo.json` |
+| Project | `tennis-report-hub` (`prj_zyhD0KGF5xH7A9YJxvS05RQyVdjL`) |
+| Owner | `dannghiem0801s-projects` |
+| Git repository | `dannghiem0801/tennis-report-hub` |
+| Production branch / URL | `main` / `https://tennis-report-hub.vercel.app` |
+| Build settings | Root `.`, Vite, `npm run build`, output `dist`, Node 24.x |
+
+Several worktrees have explicit, independent Vercel links:
+
+| Worktree | Project | Git/deployment state at verification |
+| --- | --- | --- |
+| `.worktrees/feat-apnews-20260808` | `tennis-report-hub-apnews` (`prj_rVeGWvQyNdcfeGgsIKVX2rRfW61s`) | Manual, no Git link; production `ERROR`, preview `READY` at `b4da0cd` |
+| `.worktrees/feat-apnews-20260808-v2` | `tennis-report-hub-apnews-v2` (`prj_6pXjSoL2e6NDI25LJ1b6R2kpLzwd`) | Manual, no Git link; production `READY` at `e327752` |
+| `.worktrees/feat-multi-sport-20260807` | `feat-multi-sport-20260807` (`prj_DTvfYjxnvd3bGTKb0Bwew0PtL57q`) | Manual, no Git link; production `READY` at `98faa9d` |
+| `.worktrees/feat-auto-20260808-1e804fa2` | Canonical `tennis-report-hub` | Links back to the canonical project |
+
+The related project `feat-auto-20260808-unified-watchlist-v2` (`prj_5XffvfEJMrVHHas22qOF5XYHD5WC`) is currently orphaned: it has no local `.vercel` link, Git link, or deployments.
+
+Prefer the canonical project's Git integration for feature work; it already creates branch previews (latest observed: `feat/apnews-20260808-v2`). Before deploying, inspect the root `.vercel/repo.json` or the worktree's `.vercel/project.json`. Do not casually relink the repository root, because that changes the deployment target for root-level Vercel commands.
+
+Refresh this inventory with read-only commands:
+
+```bash
+vercel whoami
+vercel project ls
+vercel project inspect tennis-report-hub
+```
 
 ### 5.3 Cloudflare Pages
 

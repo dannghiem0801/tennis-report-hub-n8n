@@ -106,6 +106,10 @@ interface AppState {
   removeFromWatchlist: (entryId: string) => void;
   markReportSeen: (reportId: string) => void;
   updateReport: (reportId: string, patch: Partial<Report>) => void;
+  /** Mark a needs-review report as reviewed. No-op for legacy
+   *  reports without `quality` so they keep their existing copy
+   *  behavior. */
+  acknowledgeReport: (reportId: string) => void;
   addTemplate: (t: Omit<ReportTemplate, "id">) => void;
   updateTemplate: (id: string, patch: Partial<ReportTemplate>) => void;
   deleteTemplate: (id: string) => void;
@@ -1145,6 +1149,24 @@ export function AppProvider({ children }: { children: ReactNode }) {
     );
   }, []);
 
+  const acknowledgeReport = useCallback((reportId: string) => {
+    setReports((rs) =>
+      rs.map((r) => {
+        if (r.id !== reportId) return r;
+        if (!r.quality) return r; // legacy report, no-op
+        if (r.quality.status === "reviewed") return r;
+        return {
+          ...r,
+          quality: {
+            ...r.quality,
+            status: "reviewed",
+            acknowledgedAt: new Date().toISOString(),
+          },
+        };
+      })
+    );
+  }, []);
+
   const addTemplate = useCallback((t: Omit<ReportTemplate, "id">) => {
     setTemplates((ts) => [...ts, { ...t, id: uid() }]);
   }, []);
@@ -1564,6 +1586,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
       removeFromWatchlist,
       markReportSeen,
       updateReport,
+      acknowledgeReport,
       addTemplate,
       updateTemplate,
       deleteTemplate,
@@ -1611,6 +1634,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
       removeFromWatchlist,
       markReportSeen,
       updateReport,
+      acknowledgeReport,
       addTemplate,
       updateTemplate,
       deleteTemplate,

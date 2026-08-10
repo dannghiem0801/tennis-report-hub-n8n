@@ -55,7 +55,19 @@ export default defineConfig(({ mode }) => {
           changeOrigin: true,
           secure: true,
           // Rewrite /search-proxy/?q=foo → /html/?q=foo
-          rewrite: (path) => path.replace(/^\/search-proxy/, "/html") || "/html/",
+        rewrite: (path) => path.replace(/^\/search-proxy/, "/html") || "/html/",
+        },
+        // Firecrawl proxy. Browser → /firecrawl-proxy/v2/search
+        // → https://api.firecrawl.dev/v2/search. Avoids the cross-
+        // origin request that Chrome / ad-blockers report as a
+        // bogus "403 Failed to load resource" in the console. The
+        // API key is still sent by the browser, but only to
+        // localhost — no CORS preflight, no browser-side rejection.
+        "/firecrawl-proxy": {
+          target: "https://api.firecrawl.dev",
+          changeOrigin: true,
+          secure: true,
+          rewrite: (path) => path.replace(/^\/firecrawl-proxy/, "") || "/",
         },
       },
     },

@@ -2,14 +2,33 @@ import type {
   FootballMatch,
   Match,
   Report,
+  ReportQuality,
   ReportTemplate,
   Settings,
   TennisMatch,
 } from "@/types";
-import { buildPromptContext, getDefaultTemplate } from "./templates";
+import { buildPromptContextWithSources, getDefaultTemplate } from "./templates";
 import { uid } from "@/lib/utils";
 import { callLLM, LLMError } from "@/api/llm";
-import { fetchFootballSources, formatFootballSources } from "@/api/football-sources";
+import { buildMatchQueries, fetchMatchSources, type FirecrawlSource } from "@/api/firecrawl";
+import { buildMatchEvidence, type MatchEvidence } from "./evidence";
+import {
+  buildRepairPrompt,
+  parseEnvelope,
+  validateEnvelope,
+  type ValidationIssue,
+  type ValidationResult,
+} from "./validate";
+
+/** Per-call max_tokens budget. The Anthropic-compatible provider advertises
+ *  a 1M context window, so we let the model produce up to 1M output
+ *  tokens per call. The validator and repair loop still gate
+ *  publication, so a long response is harmless as long as it parses
+ *  as a JSON envelope. */
+const LLM_MAX_TOKENS = 1_000_000;
+/** Validator + prompt bundle version. Bump whenever the
+ *  validator/prompt schema changes in an incompatible way. */
+export const VALIDATOR_VERSION = "publication-safe-v1";
 
 /* ================================================================== */
 /*  Sport dispatchers                                                  */
@@ -607,33 +626,235 @@ export interface GenerateOptions {
   triggeredBy?: "auto-on-completion" | "scheduled-batch";
 }
 
-export async function applyTemplate(template: ReportTemplate, match: Match, llmConfig?: Settings["llm"]) {
-  if (template.kind === "prompt") {
-    // Football prompt templates get a pre-fetched web-sources block
-    // appended to the prompt. The LLM synthesizes from the pre-fetched
-    // data instead of calling tools itself — MiniMax-M3 is unreliable
-    // at emitting proper Anthropic `tool_use` blocks (tends to output
-    // them as text), so the app does the Firecrawl search + scrape
-    // before the LLM call. Other sports are unchanged.
-    let webContext = "";
-    if (match.sport === "football") {
-      const sources = await fetchFootballSources(match as FootballMatch);
-      webContext = formatFootballSources(sources);
+export interface ApplyTemplateResult {
+  content: string;
+  isPrompt: boolean;
+  llmError?: string;
+  llmModel?: string;
+  quality?: ReportQuality;
+}
+
+export async function applyTemplate(
+  template: ReportTemplate,
+  match: Match,
+  llmConfig?: Settings["llm"],
+  options?: { signal?: AbortSignal }
+): Promise<ApplyTemplateResult> {
+  if (template.kind !== "prompt") {
+    // Literal templates are deterministic; no validator needed.
+    const winner = getMatchWinner(match);
+    return {
+      content: fillTemplate(template.content, match, winner),
+      isPrompt: false,
+    };
+  }
+
+  // ---- Publication-safe pipeline ----------------------------------
+  // 1. Build evidence (without sources initially).
+  const baseEvidence: MatchEvidence = buildMatchEvidence(match, []);
+
+  // 2. Pre-fetch external sources (only when a Firecrawl key is set).
+  const pipelineStart = Date.now();
+  let sources: FirecrawlSource[] = [];
+  if (llmConfig?.searchApiKey) {
+    try {
+      const stageStart = Date.now();
+      const fetched = await fetchMatchSources({
+        apiKey: llmConfig.searchApiKey,
+        queries: buildMatchQueries(match),
+        signal: options?.signal,
+      });
+      sources = fetched.sources;
+      // eslint-disable-next-line no-console
+      console.log(
+        `[generate] match=${match.id} firecrawl stage: ${sources.length} source(s), ${(Date.now() - stageStart) / 1000}s, ` +
+        `queries=${fetched.metrics.queriesExecuted} scrapes=${fetched.metrics.scrapeSuccesses}/${fetched.metrics.scrapeAttempts}`
+      );
+    } catch (e) {
+      // Soft failure: API-only path is always valid, so an empty
+      // sources list is acceptable. Log and continue.
+      // eslint-disable-next-line no-console
+      console.warn(
+        `[generate] firecrawl pre-fetch failed: ${e instanceof Error ? e.message : String(e)}`
+      );
     }
-    const fullPrompt = `${template.content.trim()}\n${buildPromptContext(match)}${webContext}\n`;
-    if (llmConfig?.enabled && llmConfig.apiKey && llmConfig.model) {
-      try {
-        const result = await callLLM({ prompt: fullPrompt, config: llmConfig });
-        return { content: result.content.trim(), isPrompt: false, llmModel: result.model };
-      } catch (e) {
-        const msg = e instanceof LLMError ? e.message : e instanceof Error ? e.message : "Lỗi không xác định";
-        return { content: fullPrompt, isPrompt: true, llmError: msg };
-      }
-    }
+  }
+  // Re-build evidence with the freshly-fetched sources so the JSON
+  // envelope the LLM sees contains the verified excerpts.
+  const evidence: MatchEvidence = sources.length
+    ? buildMatchEvidence(match, sources)
+    : baseEvidence;
+
+  // 3. Build the prompt. The template persona + rules + the JSON
+  // envelope go in one document. Tools are disabled by default; the
+  // LLM must answer from the envelope alone.
+  const persona = template.content.trim();
+  const fullPrompt = `${persona}\n${buildPromptContextWithSources(match, sources)}\n`;
+
+  if (!llmConfig?.enabled || !llmConfig.apiKey || !llmConfig.model) {
+    // No LLM configured — preserve the existing prompt fallback.
     return { content: fullPrompt, isPrompt: true };
   }
-  const winner = getMatchWinner(match);
-  return { content: fillTemplate(template.content, match, winner), isPrompt: false };
+
+  // Cap max_tokens per request; the safety budget is small so the
+  // validator can reliably re-parse the result.
+  const configWithCap: Settings["llm"] = {
+    ...llmConfig,
+    maxTokens: Math.min(llmConfig.maxTokens ?? LLM_MAX_TOKENS, LLM_MAX_TOKENS),
+  };
+
+  // 4. First call.
+  const draftStart = Date.now();
+  let lastResult: Awaited<ReturnType<typeof callLLM>> | null = null;
+  let lastIssues: ValidationIssue[] = [];
+  let repairAttempted = false;
+  let repairSucceeded: boolean | undefined;
+  let repairTurns = 0;
+  let repairDurationMs = 0;
+
+  try {
+    lastResult = await callLLM({
+      prompt: fullPrompt,
+      config: configWithCap,
+      disableTools: true,
+      signal: options?.signal,
+    });
+  } catch (e) {
+    const msg = e instanceof LLMError ? e.message : e instanceof Error ? e.message : "Lỗi không xác định";
+    // eslint-disable-next-line no-console
+    console.log(
+      `[generate] match=${match.id} LLM first-call failed after ${(Date.now() - draftStart) / 1000}s: ${msg}`
+    );
+    return { content: fullPrompt, isPrompt: true, llmError: msg };
+  }
+  // eslint-disable-next-line no-console
+  console.log(
+    `[generate] match=${match.id} LLM first-call ok: ${(Date.now() - draftStart) / 1000}s, ` +
+    `turns=${lastResult.observability?.turns ?? 0}, finish=${lastResult.finishReason}`
+  );
+
+  let envelope = parseEnvelope(lastResult.content);
+  let validation: ValidationResult | null = envelope
+    ? validateEnvelope(envelope, evidence, { finishReason: lastResult.finishReason })
+    : null;
+
+  // 5. Exactly one repair attempt on blocking failure.
+  if (validation && !validation.ok) {
+    const startedAt = Date.now();
+    const repairPrompt = buildRepairPrompt(
+      fullPrompt,
+      evidence,
+      validation.issues.filter((i) => i.blocking),
+      lastResult.finishReason
+    );
+    repairAttempted = true;
+    let repairResult: Awaited<ReturnType<typeof callLLM>> | null = null;
+    try {
+      repairResult = await callLLM({
+        prompt: repairPrompt,
+        config: configWithCap,
+        disableTools: true,
+        signal: options?.signal,
+      });
+    } catch {
+      // Repair failed at the network layer; keep the first attempt.
+      lastIssues = validation.issues;
+    }
+    // eslint-disable-next-line no-console
+    console.log(
+      `[generate] match=${match.id} LLM repair ok: ${(Date.now() - startedAt) / 1000}s, ` +
+      `turns=${repairResult?.observability?.turns ?? 0}, finish=${repairResult?.finishReason ?? "n/a"}`
+    );
+    repairDurationMs = Date.now() - startedAt;
+    repairTurns = repairResult?.observability?.turns ?? 0;
+    if (repairResult) {
+      const repaired = parseEnvelope(repairResult.content);
+      if (repaired) {
+        const revalidated = validateEnvelope(repaired, evidence, {
+          finishReason: repairResult.finishReason,
+        });
+        if (revalidated.ok) {
+          envelope = repaired;
+          validation = revalidated;
+          repairSucceeded = true;
+          lastIssues = revalidated.issues;
+          lastResult = repairResult;
+        } else {
+          lastIssues = revalidated.issues;
+        }
+      } else {
+        lastIssues = [
+          ...validation.issues,
+          { code: "envelope_invalid" as const, message: "Repair response không phải JSON envelope hợp lệ", blocking: true },
+        ];
+      }
+    }
+  }
+  // eslint-disable-next-line no-console
+  console.log(
+    `[generate] match=${match.id} pipeline done in ${(Date.now() - pipelineStart) / 1000}s, ` +
+    `status=${validation?.ok ? "ready" : "needs-review"}`
+  );
+
+  const totalObservability = mergeObservability(lastResult?.observability, repairTurns, repairDurationMs);
+  const quality: ReportQuality = {
+    status: validation?.ok ? "ready" : "needs-review",
+    validatedAt: new Date().toISOString(),
+    issues: (validation?.issues ?? lastIssues).map((i) => ({
+      code: i.code,
+      message: i.message,
+      blocking: i.blocking,
+    })),
+    repairAttempted,
+    repairSucceeded,
+    sourceMode: envelope?.sourceMode ?? (sources.length > 0 ? "api-plus-web" : "api-only"),
+    evidenceIdsUsed: envelope?.evidenceIdsUsed ?? ["facts"],
+    sources: sources.map((s) => ({
+      evidenceId: s.evidenceId,
+      url: s.url,
+      title: s.title,
+      verified: evidence.sources.find((es) => es.evidenceId === s.evidenceId)?.verified ?? false,
+    })),
+    validatorVersion: VALIDATOR_VERSION,
+    observability: totalObservability,
+  };
+
+  if (!envelope) {
+    return {
+      content: fullPrompt,
+      isPrompt: true,
+      llmModel: lastResult?.model,
+      quality,
+    };
+  }
+
+  return {
+    content: envelope.articleMarkdown.trim(),
+    isPrompt: false,
+    llmModel: lastResult?.model,
+    quality,
+  };
+}
+
+function mergeObservability(
+  first: { turns: number; durationMs: number } | undefined,
+  repairTurns: number,
+  repairDurationMs: number
+): ReportQuality["observability"] {
+  if (!first) {
+    return {
+      turns: 0,
+      durationMs: 0,
+      repairTurns,
+      repairDurationMs,
+    };
+  }
+  return {
+    turns: first.turns,
+    durationMs: first.durationMs,
+    repairTurns,
+    repairDurationMs,
+  };
 }
 
 const LLM_PROMPT_TEMPLATE_ID = "tpl-prompt";
@@ -658,7 +879,12 @@ export async function generateReport({ match, templates, settings, watchlistId, 
     : getDefaultTemplate(templates, sport);
 
   const winner = getMatchWinner(match);
-  const { content, isPrompt, llmError, llmModel } = await applyTemplate(template, match, settings.llm);
+  const { content, isPrompt, llmError, llmModel, quality } = await applyTemplate(
+    template,
+    match,
+    settings.llm,
+    { signal: undefined }
+  );
   const title = generateTitle(match, winner);
   if (llmAvailable) {
     if (template.id !== sportPromptTemplateId) {
@@ -692,6 +918,7 @@ export async function generateReport({ match, templates, settings, watchlistId, 
     isPrompt,
     llmError,
     llmModel,
+    quality,
     triggeredBy: triggeredBy ?? "auto-on-completion",
   };
 }

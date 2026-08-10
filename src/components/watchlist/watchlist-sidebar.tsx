@@ -330,11 +330,15 @@ function CompletedItem({
     }
   };
 
+  const status = report.quality?.status;
+  const copyDisabled = !!report.quality && status === "needs-review";
+
   return (
     <div
       className={cn(
         "group relative cursor-pointer rounded-md border bg-slate-900/40 p-2.5 transition-colors hover:border-slate-700",
-        report.isNew ? "border-emerald-500/30" : "border-slate-800"
+        report.isNew ? "border-emerald-500/30" : "border-slate-800",
+        status === "needs-review" && "border-amber-600/30"
       )}
       onClick={onOpenReport}
     >
@@ -345,7 +349,7 @@ function CompletedItem({
       )}
       <div className="flex items-start justify-between gap-2">
         <div className="min-w-0 flex-1">
-          <div className="flex items-center gap-1.5">
+          <div className="flex flex-wrap items-center gap-1.5">
             <span
               className="inline-flex h-4 w-4 flex-shrink-0 items-center justify-center rounded-sm bg-slate-800/80 text-[10px]"
               title={sportLabel}
@@ -356,6 +360,21 @@ function CompletedItem({
             <h4 className="line-clamp-2 text-[12px] font-semibold leading-snug text-slate-100">
               {report.title}
             </h4>
+            {status === "ready" && (
+              <span className="rounded-full bg-emerald-900/40 px-1.5 py-0.5 text-[9px] font-medium text-emerald-300" title="Đã validator duyệt">
+                Sẵn sàng
+              </span>
+            )}
+            {status === "needs-review" && (
+              <span className="rounded-full bg-amber-900/40 px-1.5 py-0.5 text-[9px] font-medium text-amber-300" title="Validator phát hiện vấn đề — cần duyệt trước khi copy">
+                Cần duyệt
+              </span>
+            )}
+            {status === "reviewed" && (
+              <span className="rounded-full bg-slate-700/60 px-1.5 py-0.5 text-[9px] font-medium text-slate-300" title="Người dùng đã duyệt">
+                Đã duyệt
+              </span>
+            )}
           </div>
           <p className="mt-1 line-clamp-2 text-[11px] leading-relaxed text-slate-400">
             {preview}…
@@ -389,8 +408,10 @@ function CompletedItem({
           variant={copied ? "success" : "ghost"}
           className="h-6 px-2 text-[11px]"
           onClick={handleCopy}
+          disabled={copyDisabled}
+          title={copyDisabled ? "Bài viết cần được duyệt trước khi copy" : undefined}
         >
-          {copied ? "✓ Đã copy" : "Copy"}
+          {copied ? "✓ Đã copy" : copyDisabled ? "Khóa" : "Copy"}
         </Button>
         <Button
           size="icon-sm"

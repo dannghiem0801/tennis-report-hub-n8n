@@ -260,6 +260,50 @@ export interface Report {
   llmError?: string;
   llmModel?: string;
   triggeredBy?: "auto-on-completion" | "scheduled-batch";
+  /**
+   * Quality metadata produced by the publication-safe pipeline.
+   * Optional so existing localStorage reports (without the new
+   * validator) keep working — legacy reports continue to render and
+   * remain copyable exactly as before.
+   */
+  quality?: ReportQuality;
+}
+
+export type ReportStatus = "ready" | "needs-review" | "reviewed";
+
+export interface ReportQuality {
+  status: ReportStatus;
+  /** When the validator last ran on this report. */
+  validatedAt: string;
+  /** Codes of every issue surfaced, with messages. */
+  issues: { code: string; message: string; blocking: boolean }[];
+  /** How many repair attempts the validator ran (0 or 1). */
+  repairAttempted: boolean;
+  /** Did the post-repair envelope pass validation? */
+  repairSucceeded?: boolean;
+  /** API-only or API+web evidence was used. */
+  sourceMode: "api-only" | "api-plus-web";
+  /** Stable evidence IDs cited by the model in the final article. */
+  evidenceIdsUsed: string[];
+  /** Concise source summaries, surfaced in the report viewer. */
+  sources: Array<{
+    evidenceId: string;
+    url: string;
+    title: string;
+    verified: boolean;
+  }>;
+  /** Validator + prompt bundle version that produced this report. */
+  validatorVersion: string;
+  /** Optional latency / token observability for the safety pipeline. */
+  observability?: {
+    turns: number;
+    durationMs: number;
+    repairTurns: number;
+    repairDurationMs: number;
+    totalTokens?: number;
+  };
+  /** When the user (or a manual edit) acknowledged the report. */
+  acknowledgedAt?: string;
 }
 
 export type ScheduledBatchStatus =
