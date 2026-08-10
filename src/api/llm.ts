@@ -39,9 +39,10 @@
  * server proxies them through (no CORS). In production, calls go
  * directly to the configured baseUrl.
  *
- * Browser-direct: keys are stored in localStorage and sent from the
- * client. Acceptable for personal/demo use; for production, route
- * through a server-side proxy.
+ * Direct mode: keys are stored in localStorage and sent to the configured
+ * upstream. This is intended for local/personal use. In production, the
+ * Anthropic route uses the same-origin Vercel proxy, which authenticates
+ * with a server-side key and never needs a browser key.
  *
  * `callLLM` is the public entry point — it picks the right client
  * based on `config.provider` and returns a unified `CallLLMResult`
@@ -269,9 +270,6 @@ async function callAnthropicInner(opts: CallLLMOptions): Promise<CallLLMResult> 
   const { prompt, config, signal, timeoutMs = DEFAULT_TIMEOUT_MS } = opts;
 
   // ---- Validation ----
-  if (!config.apiKey) {
-    throw new LLMError("Anthropic API key chưa được cấu hình. Vào Settings để nhập key.", 0, "unauthorized");
-  }
   if (!config.model) {
     throw new LLMError("Model chưa được cấu hình. Vào Settings để chọn model Anthropic.", 0, "bad_request");
   }
@@ -287,6 +285,10 @@ async function callAnthropicInner(opts: CallLLMOptions): Promise<CallLLMResult> 
   // In dev, rewrite non-localhost baseUrls to /llm-proxy so the Vite
   // dev server proxies them (no CORS). In production, call directly.
   const baseUrl = resolveBaseUrl(rawBaseUrl);
+  const usesVercelProxy = baseUrl === "/api/llm";
+  if (!config.apiKey && !usesVercelProxy) {
+    throw new LLMError("Anthropic API key chưa được cấu hình. Vào Settings để nhập key.", 0, "unauthorized");
+  }
   const url = `${baseUrl}/v1/messages`;
 
   // Loud diagnostic so we can confirm the dev proxy is firing
@@ -434,8 +436,11 @@ async function callAnthropicInner(opts: CallLLMOptions): Promise<CallLLMResult> 
         method: "POST",
         headers: {
           "Content-Type": "application/json",
-          "x-api-key": config.apiKey,
           "anthropic-version": ANTHROPIC_API_VERSION,
+          // The Vercel proxy authenticates with its server-side key. Never
+          // forward a browser-stored key to it; direct/dev requests still
+          // need their configured upstream credential.
+          ...(!usesVercelProxy ? { "x-api-key": config.apiKey } : {}),
         },
         body: JSON.stringify(body),
         signal: composedSignal,
@@ -769,13 +774,14 @@ function anySignal(signals: AbortSignal[]): AbortSignal {
  *       Vite strips `/llm-proxy` and forwards to the real upstream.
  *       No CORS because the browser sees only localhost.
  *
- *   PROD (deployed build, non-localhost)
+ *   PROD (deployed build, non-localhost, Anthropic provider)
  *     → "/api/llm"
- *       Vercel serverless function at `api/llm/v1/messages.ts`
- *       forwards to the upstream. Same-origin from the browser's
- *       perspective — no CORS preflight. We need this because the
- *       upstream (e.g. `api.minimax.io`) does not send
- *       `Access-Control-Allow-Origin` for our deployed domain.
+ *       Vercel serverless function at `api/llm/v1/messages.ts` forwards
+ *       to the upstream using its server-side `LLM_API_KEY`. Same-origin
+ *       from the browser's perspective — no CORS preflight and no browser
+ *       key exposure. We need this because the upstream (e.g.
+ *       `api.minimax.io`) does not send `Access-Control-Allow-Origin` for
+ *       our deployed domain.
  *
  * Two signals detect dev mode — `import.meta.env.DEV` (Vite's
  * standard) AND `window.location.hostname` being localhost. The

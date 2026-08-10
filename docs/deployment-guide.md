@@ -37,9 +37,9 @@ npm run preview          # serves dist/ on http://localhost:4173
 
 ## 4. Environment variables
 
-**None in v1.** The only "secret" is `rapidApiKey` and it is stored client-side in `localStorage`. When the real API integration lands (v2), secrets will be proxied through a Supabase Edge Function rather than the browser.
+For a production LLM, store `LLM_API_KEY` as a Vercel Environment Variable. It is read only by the `/api/llm/v1/messages` serverless function, which forwards Anthropic-compatible requests for the browser. Do not set `VITE_LLM_API_KEY` in production: every `VITE_*` variable can be embedded in the client bundle.
 
-If a future environment file is added, follow the Vite convention (`VITE_*` prefix, accessed via `import.meta.env.VITE_*`). Do not introduce non-Vite env vars.
+`VITE_LLM_ENABLED`, `VITE_LLM_PROVIDER`, `VITE_LLM_BASE_URL`, and `VITE_LLM_MODEL` are non-secret build-time configuration. The browser needs them to select the provider and model; it does not need the API key.
 
 ## 5. Hosting
 
@@ -78,6 +78,7 @@ SPA fallback (so client-side routes work after a hard refresh):
 2. Framework preset: **Vite**.
 3. Build command: `npm run build` (Vercel detects this).
 4. Output directory: `dist`.
+5. Set `LLM_API_KEY` for Production (and Preview if previews should generate reports). Keep it server-side, without a `VITE_` prefix.
 
 Keep the tracked `vercel.json`: it sends client-side routes to `index.html`, preserves `/api/*` and static assets, and rewrites `/api/flashscore/*` to the Flashscore function.
 
@@ -191,7 +192,7 @@ jobs:
       - run: npm run build
 ```
 
-`npm run build` already runs `tsc -b` (the Vite build script is `tsc -b && vite build`). A type failure fails the build, which is the right behavior for a small app without a separate `typecheck` script.
+`npm run build` already runs `tsc -b` (the Vite build script is `tsc -b && vite build`). A type failure fails the build, which is the right behavior for a small app without a separate `typecheck` script. Run `npm run test:llm-proxy` to verify that a production browser can use the server-side LLM proxy without holding an API key.
 
 ## 7. Cache strategy
 

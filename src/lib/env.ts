@@ -35,84 +35,84 @@ import type { LLMProvider, SearchProvider } from "@/types";
 // level are statically substituted. New env vars must be added here.
 function readRapidKey(): string | undefined {
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const fromMeta = (import.meta as any).env.VITE_RAPID_API_KEY;
+  const fromMeta = (import.meta as any).env?.VITE_RAPID_API_KEY;
   if (fromMeta !== undefined) return fromMeta;
   const proc = (globalThis as { process?: { env?: Record<string, string | undefined> } }).process;
   return proc?.env?.VITE_RAPID_API_KEY;
 }
 function readLlmEnabled(): string | undefined {
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const fromMeta = (import.meta as any).env.VITE_LLM_ENABLED;
+  const fromMeta = (import.meta as any).env?.VITE_LLM_ENABLED;
   if (fromMeta !== undefined) return fromMeta;
   const proc = (globalThis as { process?: { env?: Record<string, string | undefined> } }).process;
   return proc?.env?.VITE_LLM_ENABLED;
 }
 function readLlmProvider(): string | undefined {
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const fromMeta = (import.meta as any).env.VITE_LLM_PROVIDER;
+  const fromMeta = (import.meta as any).env?.VITE_LLM_PROVIDER;
   if (fromMeta !== undefined) return fromMeta;
   const proc = (globalThis as { process?: { env?: Record<string, string | undefined> } }).process;
   return proc?.env?.VITE_LLM_PROVIDER;
 }
 function readLlmBaseUrl(): string | undefined {
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const fromMeta = (import.meta as any).env.VITE_LLM_BASE_URL;
+  const fromMeta = (import.meta as any).env?.VITE_LLM_BASE_URL;
   if (fromMeta !== undefined) return fromMeta;
   const proc = (globalThis as { process?: { env?: Record<string, string | undefined> } }).process;
   return proc?.env?.VITE_LLM_BASE_URL;
 }
 function readLlmApiKey(): string | undefined {
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const fromMeta = (import.meta as any).env.VITE_LLM_API_KEY;
+  const fromMeta = (import.meta as any).env?.VITE_LLM_API_KEY;
   if (fromMeta !== undefined) return fromMeta;
   const proc = (globalThis as { process?: { env?: Record<string, string | undefined> } }).process;
   return proc?.env?.VITE_LLM_API_KEY;
 }
 function readLlmModel(): string | undefined {
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const fromMeta = (import.meta as any).env.VITE_LLM_MODEL;
+  const fromMeta = (import.meta as any).env?.VITE_LLM_MODEL;
   if (fromMeta !== undefined) return fromMeta;
   const proc = (globalThis as { process?: { env?: Record<string, string | undefined> } }).process;
   return proc?.env?.VITE_LLM_MODEL;
 }
 function readLlmTemperature(): string | undefined {
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const fromMeta = (import.meta as any).env.VITE_LLM_TEMPERATURE;
+  const fromMeta = (import.meta as any).env?.VITE_LLM_TEMPERATURE;
   if (fromMeta !== undefined) return fromMeta;
   const proc = (globalThis as { process?: { env?: Record<string, string | undefined> } }).process;
   return proc?.env?.VITE_LLM_TEMPERATURE;
 }
 function readLlmMaxTokens(): string | undefined {
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const fromMeta = (import.meta as any).env.VITE_LLM_MAX_TOKENS;
+  const fromMeta = (import.meta as any).env?.VITE_LLM_MAX_TOKENS;
   if (fromMeta !== undefined) return fromMeta;
   const proc = (globalThis as { process?: { env?: Record<string, string | undefined> } }).process;
   return proc?.env?.VITE_LLM_MAX_TOKENS;
 }
 function readLlmThinking(): string | undefined {
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const fromMeta = (import.meta as any).env.VITE_LLM_ENABLE_THINKING;
+  const fromMeta = (import.meta as any).env?.VITE_LLM_ENABLE_THINKING;
   if (fromMeta !== undefined) return fromMeta;
   const proc = (globalThis as { process?: { env?: Record<string, string | undefined> } }).process;
   return proc?.env?.VITE_LLM_ENABLE_THINKING;
 }
 function readLlmWebSearch(): string | undefined {
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const fromMeta = (import.meta as any).env.VITE_LLM_ENABLE_WEB_SEARCH;
+  const fromMeta = (import.meta as any).env?.VITE_LLM_ENABLE_WEB_SEARCH;
   if (fromMeta !== undefined) return fromMeta;
   const proc = (globalThis as { process?: { env?: Record<string, string | undefined> } }).process;
   return proc?.env?.VITE_LLM_ENABLE_WEB_SEARCH;
 }
 function readSearchProvider(): string | undefined {
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const fromMeta = (import.meta as any).env.VITE_LLM_SEARCH_PROVIDER;
+  const fromMeta = (import.meta as any).env?.VITE_LLM_SEARCH_PROVIDER;
   if (fromMeta !== undefined) return fromMeta;
   const proc = (globalThis as { process?: { env?: Record<string, string | undefined> } }).process;
   return proc?.env?.VITE_LLM_SEARCH_PROVIDER;
 }
 function readSearchApiKey(): string | undefined {
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const fromMeta = (import.meta as any).env.VITE_LLM_SEARCH_API_KEY;
+  const fromMeta = (import.meta as any).env?.VITE_LLM_SEARCH_API_KEY;
   if (fromMeta !== undefined) return fromMeta;
   const proc = (globalThis as { process?: { env?: Record<string, string | undefined> } }).process;
   return proc?.env?.VITE_LLM_SEARCH_API_KEY;

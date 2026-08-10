@@ -7,7 +7,8 @@
     "dev": "vite",
     "build": "tsc -b && vite build",
     "lint": "oxlint",
-    "preview": "vite preview"
+    "preview": "vite preview",
+    "test:llm-proxy": "tsx --tsconfig tsconfig.scripts.json scripts/test-llm-proxy.ts"
   },
   "dependencies": {
     "@hookform/resolvers": "^5.5.7",

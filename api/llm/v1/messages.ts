@@ -17,11 +17,10 @@
  *   (same-origin) and this function forwards to the upstream.
  *
  * Env vars (server-side only):
- *   - `VITE_LLM_API_KEY`  — Anthropic-compatible API key. (Same value
- *     as the client-side VITE_LLM_API_KEY; Vercel passes all env vars
- *     to the runtime regardless of prefix.) For future hardening,
- *     prefer adding a non-VITE server-only key and removing the
- *     VITE_ one from the client bundle.
+ *   - `LLM_API_KEY` — Anthropic-compatible API key. Server-side only;
+ *     never expose it through a `VITE_` variable.
+ *   - `VITE_LLM_API_KEY` — legacy fallback only. Remove it after
+ *     migrating the Vercel project to `LLM_API_KEY`.
  *   - `LLM_UPSTREAM_BASE` — optional. Default `https://api.minimax.io/anthropic`.
  *     Override if you point at a different Anthropic-compatible proxy.
  *   - `LLM_UPSTREAM_API_VERSION` — optional. Default `2023-06-01`.
@@ -66,14 +65,13 @@ export default async function handler(
     return;
   }
 
-  // Reuse the same env var the client bundle uses. Vercel serverless
-  // functions see ALL env vars regardless of VITE_ prefix, so the
-  // value the user set for the client is also visible here.
-  const apiKey = process.env.VITE_LLM_API_KEY ?? process.env.LLM_API_KEY;
+  // Prefer the server-only credential. The VITE_ fallback keeps current
+  // deployments working while the project variable is migrated.
+  const apiKey = process.env.LLM_API_KEY ?? process.env.VITE_LLM_API_KEY;
   if (!apiKey) {
     res.status(500).json({
       error:
-        "Server misconfigured: VITE_LLM_API_KEY (or LLM_API_KEY) is not set",
+        "Server misconfigured: LLM_API_KEY is not set",
     });
     return;
   }

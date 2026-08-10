@@ -32,7 +32,7 @@ cp .env.example .env.local
 # sửa .env.local, điền key vào
 ```
 
-**Quy ước đặt tên:** biến nào muốn browser đọc được phải có prefix `VITE_` (Vite chỉ expose các biến này). Biến không có prefix (như `LLM_PROXY_URL`) chỉ dùng cho dev proxy, không bao giờ ship ra client.
+**Quy ước đặt tên:** biến nào muốn browser đọc được phải có prefix `VITE_` (Vite chỉ expose các biến này). Không dùng prefix `VITE_` cho key LLM của production; Vercel proxy phải đọc `LLM_API_KEY` ở server.
 
 **Các biến hỗ trợ:**
 
@@ -42,7 +42,7 @@ cp .env.example .env.local
 | `VITE_LLM_ENABLED` | Bật/tắt auto report generation | `false` |
 | `VITE_LLM_PROVIDER` | `anthropic` hoặc `openai-compatible` | `anthropic` |
 | `VITE_LLM_BASE_URL` | Base URL của LLM proxy / API | `https://api.minimax.io/anthropic` |
-| `VITE_LLM_API_KEY` | Bearer / x-api-key cho LLM | `""` |
+| `VITE_LLM_API_KEY` | Key cho gọi LLM trực tiếp ở local/dev; không dùng trên Vercel production | `""` |
 | `VITE_LLM_MODEL` | Model identifier | `MiniMax-M3` |
 | `VITE_LLM_TEMPERATURE` | Sampling temperature `[0, 2]` | `0.7` |
 | `VITE_LLM_MAX_TOKENS` | Max output tokens | `200000` |
@@ -51,6 +51,7 @@ cp .env.example .env.local
 | `VITE_LLM_SEARCH_PROVIDER` | `firecrawl` / `duckduckgo` / `serpapi` / `brave` | `firecrawl` |
 | `VITE_LLM_SEARCH_API_KEY` | API key cho search backend | `""` |
 | `LLM_PROXY_URL` | Dev proxy target (server-side only, không prefix) | `https://api.minimax.io/anthropic` |
+| `LLM_API_KEY` | Key Anthropic-compatible chỉ cho Vercel function `/api/llm/v1/messages` | `""` |
 
 **Thứ tự ưu tiên lúc khởi động** (cao → thấp):
 
@@ -88,7 +89,7 @@ curl -X POST http://localhost:5173/__save-env \
 # {"ok":true,"wrote":["VITE_RAPID_API_KEY","VITE_LLM_API_KEY"]}
 ```
 
-> ⚠️ **Bảo mật:** Tất cả biến `VITE_*` đều được Vite inline vào bundle client. Mọi người dùng trang có thể xem được key (View Source → search `VITE_RAPID_API_KEY`). Chấp nhận được cho dùng cá nhân / demo. Cho production, route qua server proxy (xem mục Tech stack bên dưới) để giữ key bí mật.
+> ⚠️ **Bảo mật:** Tất cả biến `VITE_*` đều được Vite inline vào bundle client. Mọi người dùng trang có thể xem được key. Chấp nhận được cho dùng cá nhân / demo. Với LLM production, chỉ đặt `LLM_API_KEY` trong Vercel Environment Variables; browser gọi server proxy và không nhận key.
 
 ## 🔌 Tennis API (RapidAPI — flashscore4)
 
@@ -206,4 +207,3 @@ Thêm/sửa template: Vào `/templates` → "Tạo mẫu mới" hoặc edit temp
 Cấu hình polling: Vào `/settings` → "Khoảng thời gian (phút)".
 
 Đổi API host/endpoint: Edit `src/api/flashscore.ts` (hằng `API_HOST` + hàm `fsFetch`).
-
