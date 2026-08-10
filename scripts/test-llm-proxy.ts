@@ -1,7 +1,7 @@
 // Regression test for the production LLM proxy boundary.
 // Run with: npx tsx scripts/test-llm-proxy.ts
 
-import { callLLM } from "../src/api/llm";
+import { callLLM, isLLMConfigured } from "../src/api/llm";
 import type { LLMConfig } from "../src/types";
 
 function assert(condition: unknown, message: string): asserts condition {
@@ -44,6 +44,7 @@ async function main(): Promise<void> {
   };
 
   try {
+    assert(isLLMConfigured(config), "production proxy config without a browser API key must be available to report generation");
     const result = await callLLM({ prompt: "Viết một bản tin kiểm thử.", config, disableTools: true });
     assert(requestedUrl === "/api/llm/v1/messages", `expected production proxy URL, got ${requestedUrl}`);
     assert(requestedHeaders?.get("x-api-key") === null, "browser must not send an LLM API key to the server proxy");

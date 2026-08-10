@@ -189,6 +189,20 @@ export interface CallLLMOptions {
   disableTools?: boolean;
 }
 
+/**
+ * Whether the current browser can start an LLM call. Production Anthropic
+ * requests are authenticated by the Vercel proxy, so a browser API key is
+ * intentionally not required on that route.
+ */
+export function isLLMConfigured(config: LLMConfig | undefined): config is LLMConfig {
+  if (!config?.enabled || !config.model) return false;
+  if (config.provider !== "anthropic") return Boolean(config.apiKey);
+
+  const rawBaseUrl = (config.baseUrl ?? "").trim().replace(/\/+$/, "");
+  if (!rawBaseUrl) return false;
+  return Boolean(config.apiKey) || resolveBaseUrl(rawBaseUrl) === "/api/llm";
+}
+
 export interface CallLLMResult {
   /** Text from the TERMINAL assistant turn only. Intermediate text
    *  emitted alongside `tool_use` blocks is trace data and never

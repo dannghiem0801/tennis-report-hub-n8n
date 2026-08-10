@@ -9,7 +9,7 @@ import type {
 } from "@/types";
 import { buildPromptContextWithSources, getDefaultTemplate } from "./templates";
 import { uid } from "@/lib/utils";
-import { callLLM, LLMError } from "@/api/llm";
+import { callLLM, isLLMConfigured, LLMError } from "@/api/llm";
 import { buildMatchQueries, fetchMatchSources, type FirecrawlSource } from "@/api/firecrawl";
 import { buildMatchEvidence, type MatchEvidence } from "./evidence";
 import {
@@ -691,7 +691,7 @@ export async function applyTemplate(
   const persona = template.content.trim();
   const fullPrompt = `${persona}\n${buildPromptContextWithSources(match, sources)}\n`;
 
-  if (!llmConfig?.enabled || !llmConfig.apiKey || !llmConfig.model) {
+  if (!isLLMConfigured(llmConfig)) {
     // No LLM configured — preserve the existing prompt fallback.
     return { content: fullPrompt, isPrompt: true };
   }
@@ -860,11 +860,7 @@ function mergeObservability(
 const LLM_PROMPT_TEMPLATE_ID = "tpl-prompt";
 
 export async function generateReport({ match, templates, settings, watchlistId, triggeredBy }: GenerateOptions): Promise<Report> {
-  const llmAvailable = !!(
-    settings.llm?.enabled &&
-    settings.llm.apiKey &&
-    settings.llm.model
-  );
+  const llmAvailable = isLLMConfigured(settings.llm);
 
   // Find the right prompt template for this sport's LLM call.
   // Tennis uses tpl-prompt; football uses tpl-football-prompt.
