@@ -207,9 +207,7 @@ function anySignalPolyfill(signals: AbortSignal[]): AbortSignal {
 // Treat undefined as "not in a Vite build" → use the direct URL.
 const IS_VITE_DEV = (() => {
   try {
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const env = (import.meta as any)?.env;
-    return env?.DEV === true;
+    return import.meta.env?.DEV === true;
   } catch {
     return false;
   }

@@ -6,7 +6,7 @@ const CHROME = "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome";
   await page.goto("http://localhost:5173/", { waitUntil: "networkidle" });
   await page.waitForTimeout(3000);
   const result = await page.evaluate(() => {
-    const w = window as unknown as { __vite_env__?: Record<string, string>; import?: { meta?: { env?: Record<string, string> } };
+    const w = window as unknown as { __vite_env__?: Record<string, string>; import?: { meta?: { env?: Record<string, string> } } };
     const env = w.import?.meta?.env;
     const storage = Object.keys(localStorage).filter((k) => k.startsWith("trh:"));
     const ls: Record<string, unknown> = {};
@@ -20,7 +20,6 @@ const CHROME = "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome";
       hasImport: typeof w.import !== "undefined",
       hasEnv: !!env,
       envKeys: env ? Object.keys(env) : null,
-      rapidPrefix: env?.VITE_RAPID_API_KEY?.slice(0, 8) ?? null,
       llmPrefix: env?.VITE_LLM_API_KEY?.slice(0, 8) ?? null,
       searchPrefix: env?.VITE_LLM_SEARCH_API_KEY?.slice(0, 8) ?? null,
       ls,

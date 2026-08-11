@@ -1,6 +1,6 @@
 # Deployment Guide — Tennis Report Hub
 
-> How to ship the SPA. v1 has no server-side concerns; the entire app is a static bundle.
+> How to ship the Vite SPA and its Vercel serverless API proxies.
 
 ## 1. Build outputs
 
@@ -17,7 +17,7 @@ dist/
 └── icons.svg
 ```
 
-The `dist/` directory is the deployable artifact. There is no `server.js`, no `functions/`, no `api/`. Anything that can serve static files can host this app.
+The `dist/` directory is the deployable frontend artifact. Production also uses the tracked Vercel functions in `api/` for server-side API credentials, so a static-only host will not provide live RapidAPI data.
 
 ## 2. Local production preview
 
@@ -36,6 +36,8 @@ npm run preview          # serves dist/ on http://localhost:4173
 - **JavaScript must be enabled**. The app does not render without it.
 
 ## 4. Environment variables
+
+Store `RAPID_API_KEY` as a Vercel Environment Variable for Production and any Preview environments that need live sports data. It is read only by the `/api/flashscore/*` proxy; do not use `VITE_RAPID_API_KEY`.
 
 For a production LLM, store `LLM_API_KEY` as a Vercel Environment Variable. It is read only by the `/api/llm/v1/messages` serverless function, which forwards Anthropic-compatible requests for the browser. Do not set `VITE_LLM_API_KEY` in production: every `VITE_*` variable can be embedded in the client bundle.
 
@@ -78,7 +80,7 @@ SPA fallback (so client-side routes work after a hard refresh):
 2. Framework preset: **Vite**.
 3. Build command: `npm run build` (Vercel detects this).
 4. Output directory: `dist`.
-5. Set `LLM_API_KEY` for Production (and Preview if previews should generate reports). Keep it server-side, without a `VITE_` prefix.
+5. Set `RAPID_API_KEY` for Production (and Preview if previews should use live sports data) and `LLM_API_KEY` if reports should be generated. Keep both server-side, without a `VITE_` prefix.
 
 Keep the tracked `vercel.json`: it sends client-side routes to `index.html`, preserves `/api/*` and static assets, and rewrites `/api/flashscore/*` to the Flashscore function.
 

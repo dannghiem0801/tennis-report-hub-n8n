@@ -20,6 +20,7 @@ export default defineConfig(({ mode }) => {
   // `/llm-proxy` prefix and forwards to the real upstream — no CORS.
   const env = loadEnv(mode, __dirname, "");
   const llmProxyUrl = env.LLM_PROXY_URL || "https://api.minimax.io/anthropic";
+  const rapidApiHost = env.RAPID_API_HOST || "flashscore4.p.rapidapi.com";
 
   return {
     // `envWriterPlugin` exposes `POST /__save-env` so the Settings
@@ -43,6 +44,17 @@ export default defineConfig(({ mode }) => {
           secure: true,
           // Rewrite /llm-proxy/v1/messages → ${target}/v1/messages
           rewrite: (path) => path.replace(/^\/llm-proxy/, "") || "/",
+        },
+        // Local equivalent of the production Vercel function. The RapidAPI
+        // key stays in the Vite process and is never exposed to the browser.
+        "/api/flashscore": {
+          target: `https://${rapidApiHost}`,
+          changeOrigin: true,
+          secure: true,
+          headers: {
+            ...(env.RAPID_API_KEY ? { "X-Rapidapi-Key": env.RAPID_API_KEY } : {}),
+            "X-Rapidapi-Host": rapidApiHost,
+          },
         },
         // Search proxy for the `web_search` custom tool. Browser →
         // http://localhost:5173/search-proxy/?q=... → Vite forwards

@@ -1,9 +1,11 @@
 /**
  * FlashScore4 API client (RapidAPI)
  *
- * Host: flashscore4.p.rapidapi.com
- * Auth: X-Rapidapi-Key + X-Rapidapi-Host headers
- * Base path: /api/flashscore/v2
+ * Browser base path: /api/flashscore/v2
+ *
+ * Requests always go through the same-origin server proxy. The proxy reads
+ * RAPID_API_KEY from its server environment and adds the RapidAPI headers, so
+ * the credential never reaches the browser or localStorage.
  *
  * Daily workflow (single call, returns everything for the day):
  *   GET /matches/list-by-date?sport_id=2&date=YYYY-MM-DD&timezone=Asia%2FBangkok
@@ -33,8 +35,8 @@
 
 import { apiCache } from "./cache";
 
-const API_HOST = "flashscore4.p.rapidapi.com";
-const API_BASE = `https://${API_HOST}/api/flashscore/v2`;
+const API_BASE = "/api/flashscore/v2";
+const DEFAULT_API_HOST = "flashscore4.p.rapidapi.com";
 
 // TTL constants
 const TTL = {
@@ -91,39 +93,56 @@ export class FlashscoreApiError extends Error {
 /* ------------------------------------------------------------------ */
 
 interface RequestOptions {
-  apiKey: string;
   signal?: AbortSignal;
+}
+
+function resolveRequestTarget(): { baseUrl: string; headers?: Record<string, string> } {
+  // Operational scripts run under Node, where a relative browser URL is not
+  // usable. They may use the same server-only environment variable directly;
+  // browser requests always use the same-origin proxy above.
+  if (typeof window === "undefined") {
+    const processEnv = (globalThis as {
+      process?: { env?: Record<string, string | undefined> };
+    }).process?.env;
+    const apiKey = processEnv?.RAPID_API_KEY;
+    const host = processEnv?.RAPID_API_HOST || DEFAULT_API_HOST;
+    if (!apiKey) {
+      throw new FlashscoreApiError(
+        "RAPID_API_KEY chưa được cấu hình trên máy chủ.",
+        0,
+        "unauthorized"
+      );
+    }
+    return {
+      baseUrl: `https://${host}/api/flashscore/v2`,
+      headers: {
+        "X-Rapidapi-Key": apiKey,
+        "X-Rapidapi-Host": host,
+      },
+    };
+  }
+  return { baseUrl: API_BASE };
 }
 
 async function fsFetch<T>(
   path: string,
   opts: RequestOptions
 ): Promise<T> {
-  if (!opts.apiKey) {
-    throw new FlashscoreApiError(
-      "RapidAPI key chưa được cấu hình. Vào Settings để nhập key.",
-      0,
-      "unauthorized"
-    );
-  }
-
-  const url = `${API_BASE}${path}`;
+  const target = resolveRequestTarget();
+  const url = `${target.baseUrl}${path}`;
 
   let res: Response;
   try {
     res = await fetch(url, {
       method: "GET",
-      headers: {
-        "X-Rapidapi-Key": opts.apiKey,
-        "X-Rapidapi-Host": API_HOST,
-      },
+      headers: target.headers,
       signal: opts.signal,
     });
   } catch (e) {
     const isAbort = e instanceof DOMException && e.name === "AbortError";
     if (isAbort) throw new FlashscoreApiError("Request đã bị huỷ.", 0, "network");
     throw new FlashscoreApiError(
-      "Không thể kết nối tới FlashScore API. Kiểm tra mạng, hoặc có thể bị trình duyệt chặn CORS — hãy dùng Vite dev proxy.",
+      "Không thể kết nối tới máy chủ dữ liệu. Kiểm tra mạng rồi thử lại.",
       0,
       "cors"
     );
@@ -134,14 +153,14 @@ async function fsFetch<T>(
   }
   if (res.status === 401) {
     throw new FlashscoreApiError(
-      "API key không hợp lệ. Vào Settings kiểm tra lại RapidAPI key.",
+      "Máy chủ chưa được cấp quyền truy cập RapidAPI. Liên hệ quản trị viên.",
       401,
       "unauthorized"
     );
   }
   if (res.status === 403) {
     throw new FlashscoreApiError(
-      "API key bị từ chối (403). Kiểm tra gói subscription trên RapidAPI.",
+      "Máy chủ bị từ chối bởi RapidAPI (403). Liên hệ quản trị viên.",
       403,
       "forbidden"
     );

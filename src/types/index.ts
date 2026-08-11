@@ -361,7 +361,6 @@ export interface ReportTemplate {
 }
 
 export interface Settings {
-  rapidApiKey: string;
   pollingIntervalMinutes: number;
   defaultTemplateId: string;
   timezone: string;

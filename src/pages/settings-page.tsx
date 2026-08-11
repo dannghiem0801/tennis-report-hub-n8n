@@ -13,7 +13,7 @@ import {
 } from "@/components/ui/select";
 import { Badge } from "@/components/ui/badge";
 import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
-import { Key, Bell, Clock, Globe, Database, Check, AlertCircle, Loader2, ExternalLink, ShieldAlert, Trash2, HardDrive, Brain, Sparkles, Save, SlidersHorizontal, Search } from "lucide-react";
+import { Key, Bell, Clock, Globe, Database, Check, Loader2, ShieldAlert, Trash2, HardDrive, Brain, Sparkles, Save, SlidersHorizontal, Search } from "lucide-react";
 import { toast } from "sonner";
 import { formatDateVi, timeAgo } from "@/lib/utils";
 import { callLLM, LLMError, DEFAULT_LLM as FALLBACK_LLM } from "@/api/llm";
@@ -77,7 +77,6 @@ export function SettingsPage() {
   const handleSaveToEnv = async () => {
     setIsSavingToEnv(true);
     const updates: Record<string, string> = {};
-    if (settings.rapidApiKey) updates.VITE_RAPID_API_KEY = settings.rapidApiKey;
     if (llm.enabled !== undefined) updates.VITE_LLM_ENABLED = String(llm.enabled);
     if (llm.provider) updates.VITE_LLM_PROVIDER = llm.provider;
     if (llm.baseUrl) updates.VITE_LLM_BASE_URL = llm.baseUrl;
@@ -223,57 +222,24 @@ export function SettingsPage() {
               <CardHeader className="pb-2">
                 <CardTitle className="flex items-center gap-2 text-sm">
                   <Key className="h-3.5 w-3.5 text-blue-400" />
-                  RapidAPI Key (Tennis API)
+                  Tennis API (máy chủ)
                 </CardTitle>
                 <CardDescription className="text-[11px]">
-                  Key dùng để gọi FlashScore API lấy dữ liệu trận đấu tennis thật (ATP + WTA + Challenger + ITF) theo ngày.
+                  RapidAPI được cấu hình trên máy chủ. Trình duyệt không lưu hoặc gửi API key.
                 </CardDescription>
               </CardHeader>
               <CardContent className="space-y-2">
-                <div>
-                  <div className="flex items-center justify-between">
-                    <Label className="text-[11px]">API Key</Label>
-                    {env.rapidApiKey() && (
-                      <Badge
-                        variant="outline"
-                        className="border-blue-500/30 bg-blue-500/10 text-[9px] text-blue-300"
-                        title="Giá trị này đang được load từ biến môi trường VITE_RAPID_API_KEY trong .env.local. Khi reload, giá trị từ .env sẽ ghi đè giá trị bạn nhập ở đây. Để UI override bền vững, hãy xoá dòng VITE_RAPID_API_KEY trong .env.local."
-                      >
-                        Từ .env
-                      </Badge>
-                    )}
-                  </div>
-                  <Input
-                    type="password"
-                    value={settings.rapidApiKey}
-                    onChange={(e) => {
-                      updateSettings({ rapidApiKey: e.target.value });
-                      if (testStatus !== "idle") setTestStatus("idle");
-                    }}
-                    placeholder="Nhập RapidAPI key..."
-                    className="font-mono text-[12px]"
-                  />
-                </div>
                 <div className="flex flex-wrap items-center gap-2">
                   <div className="flex items-center gap-1.5 text-[10px] text-slate-500">
-                    {settings.rapidApiKey ? (
-                      <>
-                        <Check className="h-3 w-3 text-emerald-400" />
-                        <span>Đã cấu hình</span>
-                      </>
-                    ) : (
-                      <>
-                        <AlertCircle className="h-3 w-3 text-amber-400" />
-                        <span>Chưa cấu hình — app đang dùng dữ liệu mẫu.</span>
-                      </>
-                    )}
+                    <ShieldAlert className="h-3 w-3 text-blue-400" />
+                    <span>Biến môi trường cần có: <code>RAPID_API_KEY</code></span>
                   </div>
                   <div className="ml-auto flex items-center gap-1.5">
                     <Button
                       size="sm"
                       variant="outline"
                       onClick={handleTest}
-                      disabled={!settings.rapidApiKey || testStatus === "testing"}
+                      disabled={testStatus === "testing"}
                       className="h-7 text-[11px]"
                     >
                       {testStatus === "testing" ? (
@@ -300,19 +266,10 @@ export function SettingsPage() {
                 <div className="flex items-start gap-1.5 rounded border border-slate-800 bg-slate-900/40 px-2 py-1.5 text-[10px] text-slate-400">
                   <ShieldAlert className="mt-0.5 h-3 w-3 flex-shrink-0 text-amber-400" />
                   <span>
-                    Key được lưu local trong trình duyệt và gửi trực tiếp tới RapidAPI.
-                    Cho production, nên route qua server proxy để giữ key bí mật.
+                    Đặt <code>RAPID_API_KEY</code> trong biến môi trường của Vercel (hoặc
+                    <code> .env.local</code> khi chạy local). Key chỉ được đọc bởi proxy máy chủ.
                   </span>
                 </div>
-                <a
-                  href="https://rapidapi.com/search/flashscore4%20tennis"
-                  target="_blank"
-                  rel="noreferrer"
-                  className="inline-flex items-center gap-1 text-[11px] text-blue-400 hover:text-blue-300"
-                >
-                  Lấy key tại RapidAPI <ExternalLink className="h-3 w-3" />
-                </a>
-  
                 {/* Cache info — helps user see why a refresh is instant */}
                 <div className="flex items-center justify-between gap-2 rounded border border-slate-800 bg-slate-900/40 px-2 py-1.5 text-[10px] text-slate-400">
                   <span className="flex items-center gap-1.5">

@@ -56,7 +56,7 @@ async function fetchCompleted(sport: string, days: number): Promise<Match[]> {
     const dateKey = d.toISOString().slice(0, 10);
     try {
       const payload = await getMatchesByDate({
-        apiKey: env.VITE_RAPID_API_KEY, sportId, date: dateKey, timezone: "Asia/Ho_Chi_Minh",
+        sportId, date: dateKey, timezone: "Asia/Ho_Chi_Minh",
       });
       const { matches } = mapMatchesBatch({ payload, dateKey, sport: sport as "tennis" | "football" });
       out.push(...matches.filter((m) => m.status === "completed"));

@@ -8,7 +8,6 @@ const CHROME = "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome";
   const result = await page.evaluate(async () => {
     const envMod = await import("/src/lib/env.ts");
     return {
-      rapidApiKey: envMod.env.rapidApiKey()?.slice(0, 8),
       llmApiKey: envMod.env.llm.apiKey()?.slice(0, 8),
       llmModel: envMod.env.llm.model(),
       llmBase: envMod.env.llm.baseUrl(),

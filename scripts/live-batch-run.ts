@@ -43,7 +43,7 @@ process.env.VITE_LLM_ENABLE_THINKING = env.VITE_LLM_ENABLE_THINKING;
 process.env.VITE_LLM_ENABLE_WEB_SEARCH = env.VITE_LLM_ENABLE_WEB_SEARCH;
 process.env.VITE_LLM_SEARCH_PROVIDER = env.VITE_LLM_SEARCH_PROVIDER;
 process.env.VITE_LLM_SEARCH_API_KEY = env.VITE_LLM_SEARCH_API_KEY;
-process.env.VITE_RAPID_API_KEY = env.VITE_RAPID_API_KEY;
+process.env.RAPID_API_KEY = env.RAPID_API_KEY;
 
 // Patch import.meta.env with a Proxy that reads from process.env when
 // the key isn't already on viteEnv.
@@ -93,7 +93,6 @@ type TennisMatch = types.TennisMatch;
 type FootballMatch = types.FootballMatch;
 type LLMConfig = types.LLMConfig;
 
-const apiKey = env.VITE_RAPID_API_KEY ?? "";
 const llmConfig: LLMConfig = {
   // Inside Node/tsx we route through the Vite dev proxy so the LLM
   // call lands on the same upstream the browser would use.
@@ -148,7 +147,6 @@ async function fetchCompletedMatches(sport: string, lookbackDays: number): Promi
     const dateKey = d.toISOString().slice(0, 10);
     try {
       const payload = await getMatchesByDate({
-        apiKey,
         sportId,
         date: dateKey,
         timezone: "Asia/Ho_Chi_Minh",
@@ -169,8 +167,8 @@ async function fetchCompletedMatches(sport: string, lookbackDays: number): Promi
 async function enrichTennis(m: TennisMatch): Promise<TennisMatch> {
   try {
     const [detailsRes, pbpRes] = await Promise.allSettled([
-      getMatchDetails({ apiKey, matchId: m.id }).then(mapMatchDetails),
-      getPointByPoint({ apiKey, matchId: m.id }).then(mapPointByPoint),
+      getMatchDetails({ matchId: m.id }).then(mapMatchDetails),
+      getPointByPoint({ matchId: m.id }).then(mapPointByPoint),
     ]);
     const details = detailsRes.status === "fulfilled" ? detailsRes.value : null;
     const pbp = pbpRes.status === "fulfilled" ? pbpRes.value : null;

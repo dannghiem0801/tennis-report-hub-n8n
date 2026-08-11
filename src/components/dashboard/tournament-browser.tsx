@@ -3,9 +3,8 @@ import { useApp } from "@/store/app-store";
 import { TournamentCard } from "./tournament-card";
 import { Skeleton } from "@/components/ui/skeleton";
 import type { Tournament } from "@/types";
-import { AlertCircle, Inbox, Globe2, Calendar, Loader2, Settings as SettingsIcon } from "lucide-react";
+import { AlertCircle, Inbox, Globe2, Calendar, Loader2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
-import { Link } from "react-router-dom";
 import { formatDateVi, formatTime, parseDateKey } from "@/lib/utils";
 
 interface TournamentBrowserProps {
@@ -23,7 +22,6 @@ export function TournamentBrowser({ onOpenReport, onOpenScheduleModal }: Tournam
     isUsingLiveData,
     selectedDate,
     lastFetchedAt,
-    settings,
     findNearbyDateWithMatches,
   } = useApp();
   const [isSearching, setIsSearching] = useState(false);
@@ -56,53 +54,12 @@ export function TournamentBrowser({ onOpenReport, onOpenScheduleModal }: Tournam
     }).filter(Boolean) as { tournament: Tournament; matches: typeof matches }[];
   }, [matches, tournamentLookup]);
 
-  const hasApiKey = !!settings.rapidApiKey?.trim();
-
   if (isFetchingMatches && matches.length === 0) {
     return (
       <div className="flex flex-col gap-3">
         {[1, 2, 3].map((i) => (
           <Skeleton key={i} className="h-16 w-full" />
         ))}
-      </div>
-    );
-  }
-
-  // No API key configured — show setup guidance instead of generic error
-  if (!hasApiKey && !matchError) {
-    return (
-      <div className="flex flex-col items-center gap-3 rounded-lg border border-amber-700/40 bg-amber-900/10 p-8 text-center">
-        <div className="flex h-12 w-12 items-center justify-center rounded-full bg-amber-500/15 text-amber-300">
-          <SettingsIcon className="h-6 w-6" />
-        </div>
-        <div>
-          <p className="text-sm font-semibold text-slate-100">
-            Chưa cấu hình Tennis API key
-          </p>
-          <p className="mt-1.5 max-w-md text-xs text-slate-400">
-            App hiện chỉ lấy dữ liệu thật từ Tennis API (RapidAPI). Vào Settings dán
-            key của bạn vào ô "RapidAPI Key", bấm Test connection để xác nhận, rồi
-            quay lại Dashboard.
-          </p>
-          <p className="mt-2 text-[11px] text-slate-500">
-            Chưa có key? Đăng ký tại{" "}
-            <a
-              href="https://rapidapi.com/search/flashscore4%20tennis"
-              target="_blank"
-              rel="noreferrer"
-              className="text-blue-400 hover:text-blue-300"
-            >
-              flashscore4 tennis trên RapidAPI
-            </a>
-            .
-          </p>
-        </div>
-        <Button asChild size="sm">
-          <Link to="/settings">
-            <SettingsIcon className="h-3.5 w-3.5" />
-            Mở Settings
-          </Link>
-        </Button>
       </div>
     );
   }
@@ -116,14 +73,6 @@ export function TournamentBrowser({ onOpenReport, onOpenScheduleModal }: Tournam
           <Button size="sm" variant="outline" onClick={refreshMatches}>
             Thử lại
           </Button>
-          {!hasApiKey && (
-            <Button asChild size="sm" variant="ghost">
-              <Link to="/settings">
-                <SettingsIcon className="h-3.5 w-3.5" />
-                Mở Settings
-              </Link>
-            </Button>
-          )}
         </div>
       </div>
     );

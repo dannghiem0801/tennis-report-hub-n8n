@@ -309,7 +309,7 @@ async function callAnthropicInner(opts: CallLLMOptions): Promise<CallLLMResult> 
   // eslint-disable-next-line no-console
   console.log(
     `[llm] callAnthropic → ${url} (rawBaseUrl=${rawBaseUrl}, baseUrl=${baseUrl}, ` +
-      `isDev=${typeof import.meta !== "undefined" && (import.meta as { env?: { DEV?: boolean } }).env?.DEV === true})`
+      `isDev=${import.meta.env?.DEV === true})`
   );
 
   // ---- Split prompt into system + user at the "## Dữ liệu trận đấu" marker ----
@@ -819,8 +819,7 @@ function anySignal(signals: AbortSignal[]): AbortSignal {
  */
 function resolveBaseUrl(baseUrl: string): string {
   // Signal 1: Vite's standard dev flag (works in normal Vite dev).
-  const viteDev =
-    typeof import.meta !== "undefined" && (import.meta as { env?: { DEV?: boolean } }).env?.DEV === true;
+  const viteDev = import.meta.env?.DEV === true;
 
   // Signal 2: current page is being served from localhost / 127.0.0.1
   // (catches the case where the user has a stale prod build open in a
@@ -1310,7 +1309,7 @@ async function runJsonSearch(opts: JsonSearchOptions): Promise<string> {
  * Kept as a fallback for users who don't have a paid API key.
  */
 async function runDuckDuckGoSearch(query: string): Promise<string> {
-  const isDev = typeof import.meta !== "undefined" && (import.meta as { env?: { DEV?: boolean } }).env?.DEV === true;
+  const isDev = import.meta.env?.DEV === true;
   if (!isDev) {
     return [
       `[DuckDuckGo chỉ khả dụng trong dev mode (qua Vite proxy)]`,

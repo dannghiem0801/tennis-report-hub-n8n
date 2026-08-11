@@ -23,7 +23,6 @@ import type {
   Sport,
   WatchlistEntry,
 } from "@/types";
-import { env } from "@/lib/env";
 
 const KEYS = {
   watchlist: (sport: Sport) => `trh:${sport}:watchlist`,
@@ -186,18 +185,15 @@ export const storage = {
   },
   getSettings(): Settings {
     const baseDefaults: Settings = {
-      rapidApiKey: "",
       pollingIntervalMinutes: 0,
       defaultTemplateId: "tpl-default",
       timezone: "Asia/Ho_Chi_Minh",
       notificationsEnabled: true,
     };
     const stored = read<Partial<Settings>>(KEYS.settings, {});
-    const envRapidKey = env.rapidApiKey();
     return {
       ...baseDefaults,
       ...stored,
-      ...(envRapidKey ? { rapidApiKey: envRapidKey } : {}),
     };
   },
   setSettings(settings: Settings): void {

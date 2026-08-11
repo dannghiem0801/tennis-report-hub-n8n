@@ -11,7 +11,6 @@ import {
   FileText,
   ChevronRight,
   AlertTriangle,
-  Database,
   Globe2,
   X,
   Clock,
@@ -107,8 +106,7 @@ export function DashboardPage() {
 }
 
 function DashboardHeader() {
-  const { isUsingLiveData, lastFetchedAt, refreshMatches, isFetchingMatches, isRateLimited, settings, activeSport } = useApp();
-  const hasApiKey = !!settings.rapidApiKey?.trim();
+  const { isUsingLiveData, lastFetchedAt, refreshMatches, isFetchingMatches, isRateLimited, activeSport } = useApp();
   // Per ADR 0002, the active sport is a dashboard filter, so the
   // header copy follows the active sport. Watchlist / reports below
   // remain sport-agnostic regardless.
@@ -145,16 +143,12 @@ function DashboardHeader() {
           className={`flex items-center gap-1 rounded-full border px-2 py-0.5 text-[10px] ${
             isUsingLiveData
               ? "border-emerald-700/60 bg-emerald-900/30 text-emerald-300"
-              : hasApiKey
-                ? "border-slate-700 bg-slate-800/50 text-slate-400"
-                : "border-amber-700/60 bg-amber-900/30 text-amber-300"
+              : "border-slate-700 bg-slate-800/50 text-slate-400"
           }`}
           title={
             isUsingLiveData
               ? `Đang lấy dữ liệu trực tiếp từ ${apiLabel}`
-              : hasApiKey
-                ? `Đang chờ ${apiLabel} phản hồi (lần fetch đầu hoặc sau lỗi tạm thời)`
-                : `Chưa cấu hình ${apiLabel} key. Vào Settings để nhập key.`
+              : `Đang chờ ${apiLabel} phản hồi (lần fetch đầu hoặc sau lỗi tạm thời)`
           }
         >
           {isUsingLiveData ? (
@@ -162,15 +156,10 @@ function DashboardHeader() {
               <Globe2 className="h-3 w-3" />
               Live API
             </>
-          ) : hasApiKey ? (
+          ) : (
             <>
               <Loader2 className="h-3 w-3 animate-spin" />
               Đang chờ API
-            </>
-          ) : (
-            <>
-              <Database className="h-3 w-3" />
-              Chưa cấu hình
             </>
           )}
         </span>

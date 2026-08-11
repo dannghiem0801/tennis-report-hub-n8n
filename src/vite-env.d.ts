@@ -18,10 +18,6 @@
  *   4. Add a parser in `src/lib/env.ts`.
  */
 interface ImportMetaEnv {
-  // ---- Tennis data ----
-  /** RapidAPI key for flashscore4 tennis endpoint. */
-  readonly VITE_RAPID_API_KEY?: string;
-
   // ---- LLM (Anthropic / OpenAI-compatible) ----
   /** "true" / "false" string. Master switch for the LLM. */
   readonly VITE_LLM_ENABLED?: string;

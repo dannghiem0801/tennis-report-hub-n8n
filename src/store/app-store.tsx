@@ -44,21 +44,6 @@ const SPORT_ID_MAP: Record<Sport, number> = {
   basketball: 3,
 };
 
-/**
- * Display label for an empty-dashboard error message, sport-aware.
- * Tennis has its own legacy label; football uses a generic "Sports API key"
- * label that reads naturally in Vietnamese.
- */
-function emptyKeyErrorMessage(sport: Sport): string {
-  if (sport === "tennis") {
-    return "Chưa cấu hình Tennis API key. Vào Settings để nhập key và bắt đầu xem dữ liệu thật.";
-  }
-  if (sport === "football") {
-    return "Chưa cấu hình Sports API key. Vào Settings để nhập key và bắt đầu xem dữ liệu bóng đá.";
-  }
-  return "Chưa cấu hình API key. Vào Settings để nhập key.";
-}
-
 interface AppState {
   // data
   /** Sport currently selected on the TopBar. Drives all filtering
@@ -116,7 +101,7 @@ interface AppState {
   setDefaultTemplate: (id: string) => void;
   updateSettings: (patch: Partial<Settings>) => void;
   dismissMatchError: () => void;
-  /** Test the configured API key by fetching today's ATP fixtures.
+  /** Test the server-side RapidAPI configuration with today's fixtures.
    *  Returns null on success, or an error message string. */
   testApiConnection: () => Promise<string | null>;
   /** Clear cached API responses (fixtures + tournament info). Use when
@@ -175,15 +160,14 @@ const AppContext = createContext<AppState | null>(null);
  */
 async function fetchAndCacheMatchData(
   matchId: string,
-  apiKey: string,
   requestedRef: MutableRefObject<Set<string>>,
   setMatches: Dispatch<SetStateAction<Match[]>>,
 ): Promise<{ sets?: TennisMatch["sets"]; pointByPoint?: TennisMatch["pointByPoint"]; stats?: TennisMatch["stats"] }> {
   // Fire both calls in parallel. allSettled guarantees we get both
   // outcomes even if one rejects.
   const [detailsResult, pbpResult] = await Promise.allSettled([
-    getMatchDetails({ apiKey, matchId }).then(mapMatchDetails),
-    getPointByPoint({ apiKey, matchId }).then(mapPointByPoint),
+    getMatchDetails({ matchId }).then(mapMatchDetails),
+    getPointByPoint({ matchId }).then(mapPointByPoint),
   ]);
 
   const details = detailsResult.status === "fulfilled" ? detailsResult.value : null;
@@ -354,27 +338,12 @@ export function AppProvider({ children }: { children: ReactNode }) {
       setIsFetchingMatches(true);
       setMatchError(null);
       try {
-        const apiKey = settings.rapidApiKey?.trim() ?? "";
-
-        if (!apiKey) {
-          // No API key configured → show empty state with a clear guidance
-          // message. The user must configure a key in Settings before the
-          // app can show real data.
-          setMatches([]);
-          setTournaments([]);
-          setIsUsingLiveData(false);
-          setLastFetchedAt(null);
-          setMatchError(emptyKeyErrorMessage(activeSport));
-          return;
-        }
-
         // Real API path: FlashScore4 (single call per day).
         //   GET /api/flashscore/v2/matches/list-by-date?sport_id={sportId}&date=YYYY-MM-DD&timezone=Asia/Ho_Chi_Minh
         //   Response shape: TBD — mapper handles multiple common patterns
         //   defensively (see src/api/flashscore-mapper.ts for path arrays).
         // Cached 30 min, in-flight deduped inside flashscore.ts.
         const payload = await getMatchesByDate({
-          apiKey,
           sportId: SPORT_ID_MAP[activeSport],
           date: dateKey,
           timezone: APP_TIMEZONE,
@@ -421,7 +390,6 @@ export function AppProvider({ children }: { children: ReactNode }) {
             const key = formatDateKey(d);
             try {
               const fallbackPayload = await getMatchesByDate({
-                apiKey,
                 sportId: SPORT_ID_MAP[activeSport],
                 date: key,
                 timezone: APP_TIMEZONE,
@@ -469,7 +437,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
 
     inFlightFetchRef.current.set(dateKey, work);
     return work;
-  }, [settings.rapidApiKey, rateLimitUntil, activeSport]);
+  }, [rateLimitUntil, activeSport]);
 
   // initial fetch
   useEffect(() => {
@@ -482,7 +450,6 @@ export function AppProvider({ children }: { children: ReactNode }) {
 
   const findNearbyDateWithMatches = useCallback(
     async (maxDaysBack = 7): Promise<string | null> => {
-      if (!settings.rapidApiKey?.trim()) return null;
       // Sequential day-by-day. Stops at first date with matches. Cache makes
       // repeated calls free (e.g. when user toggles sample data on/off).
       const current = parseDateKey(selectedDate);
@@ -492,7 +459,6 @@ export function AppProvider({ children }: { children: ReactNode }) {
         const key = formatDateKey(d);
         try {
           const payload = await getMatchesByDate({
-            apiKey: settings.rapidApiKey,
             sportId: SPORT_ID_MAP[activeSport],
             date: key,
             timezone: APP_TIMEZONE,
@@ -510,7 +476,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
       }
       return null;
     },
-    [settings.rapidApiKey, selectedDate, activeSport]
+    [selectedDate, activeSport]
   );
 
   const clearAutoPick = useCallback(() => setIsDateAutoPicked(false), []);
@@ -592,10 +558,6 @@ export function AppProvider({ children }: { children: ReactNode }) {
     }
     if (isRateLimited) return;
     if (settings.pollingIntervalMinutes === 0) return;
-    if (!settings.rapidApiKey?.trim()) return;
-
-    const apiKey = settings.rapidApiKey.trim();
-
     const tick = async () => {
       if (perEntryPollInFlightRef.current) return;
       perEntryPollInFlightRef.current = true;
@@ -622,7 +584,6 @@ export function AppProvider({ children }: { children: ReactNode }) {
           if (!sportId) continue;
           try {
             const payload = await getMatchesByDate({
-              apiKey,
               sportId,
               date,
               timezone: APP_TIMEZONE,
@@ -683,7 +644,6 @@ export function AppProvider({ children }: { children: ReactNode }) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [
     settings.pollingIntervalMinutes,
-    settings.rapidApiKey,
     isRateLimited,
     pendingPollKey,
   ]);
@@ -716,8 +676,6 @@ export function AppProvider({ children }: { children: ReactNode }) {
   const enrichRequestedRef = useRef<Set<string>>(new Set());
 
   useEffect(() => {
-    if (!settings.rapidApiKey?.trim()) return;
-    const apiKey = settings.rapidApiKey.trim();
     const watchlistIds = new Set(watchlist.map((e) => e.matchApiId));
     const needsEnrich = matches.filter((m) => {
       if (!watchlistIds.has(m.id)) return false;
@@ -733,9 +691,9 @@ export function AppProvider({ children }: { children: ReactNode }) {
     });
     for (const m of needsEnrich) {
       enrichRequestedRef.current.add(m.id);
-      void fetchAndCacheMatchData(m.id, apiKey, enrichRequestedRef, setMatches);
+      void fetchAndCacheMatchData(m.id, enrichRequestedRef, setMatches);
     }
-  }, [matches, watchlist, settings.rapidApiKey]);
+  }, [matches, watchlist]);
 
   // Helper: after matches OR watchlist change, check if any pending entries
   // have matches that are now completed — kick off the report pipeline.
@@ -875,16 +833,15 @@ export function AppProvider({ children }: { children: ReactNode }) {
           !(match as TennisMatch).sets || (match as TennisMatch).sets!.length === 0 || !(match as TennisMatch).pointByPoint
         );
         const needsFootballEnrich = match.sport === "football" && false; // v1.5 MVP: football events not yet enriched; rely on list-by-date
-        const needsEnrich = (needsTennisEnrich || needsFootballEnrich) && settings.rapidApiKey?.trim();
+        const needsEnrich = needsTennisEnrich || needsFootballEnrich;
         if (match.status === "completed" && needsEnrich) {
           transition("fetching-pbp");
           try {
-            const apiKey = settings.rapidApiKey.trim();
             if (match.sport === "tennis") {
               // Run both calls in parallel; partial success is fine.
               const [detailsResult, pbpResult] = await Promise.allSettled([
-                getMatchDetails({ apiKey, matchId: match.id }).then(mapMatchDetails),
-                getPointByPoint({ apiKey, matchId: match.id }).then(mapPointByPoint),
+                getMatchDetails({ matchId: match.id }).then(mapMatchDetails),
+                getPointByPoint({ matchId: match.id }).then(mapPointByPoint),
               ]);
 
               const patch: Partial<TennisMatch> = {};
@@ -1124,16 +1081,14 @@ export function AppProvider({ children }: { children: ReactNode }) {
         isNewlyAdded &&
         match.status === "completed" &&
         needsTennisEnrich &&
-        settings.rapidApiKey?.trim() &&
         !enrichRequestedRef.current.has(match.id)
       ) {
         enrichRequestedRef.current.add(match.id);
-        const apiKey = settings.rapidApiKey.trim();
-        void fetchAndCacheMatchData(match.id, apiKey, enrichRequestedRef, setMatches);
+        void fetchAndCacheMatchData(match.id, enrichRequestedRef, setMatches);
       }
       return result;
     },
-    [selectedDate, settings.rapidApiKey]
+    [selectedDate]
   );
 
   const markReportSeen = useCallback((reportId: string) => {
@@ -1196,25 +1151,22 @@ export function AppProvider({ children }: { children: ReactNode }) {
   const dismissMatchError = useCallback(() => setMatchError(null), []);
 
   const testApiConnection = useCallback(async (): Promise<string | null> => {
-    const apiKey = settings.rapidApiKey?.trim() ?? "";
-    if (!apiKey) return "Chưa nhập API key.";
     try {
-      // Cheap ping: list-by-date for today. Returns 200 + (possibly empty)
-      // Stages list. If we get a 200, the key + host combo works.
+      // Cheap ping: list-by-date for today. A successful response confirms
+      // the server-side RapidAPI configuration.
       const today = formatDateKey(new Date());
       const res = await getMatchesByDate({
-        apiKey,
         sportId: SPORT_ID_MAP[activeSport],
         date: today,
         timezone: settings.timezone || "Asia/Ho_Chi_Minh",
       });
-      // No error thrown → key is valid
+      // No error thrown → server configuration is valid
       void res;
       return null;
     } catch (e) {
       return e instanceof Error ? e.message : "Lỗi không xác định.";
     }
-  }, [settings.rapidApiKey]);
+  }, [activeSport, settings.timezone]);
 
   const clearApiCacheAndRefresh = useCallback(() => {
     clearApiCache();
@@ -1506,14 +1458,6 @@ export function AppProvider({ children }: { children: ReactNode }) {
   }, []);
 
   const hasRunningBatch = scheduledBatches.some((b) => b.status === "running");
-
-  // Clear API cache when the key changes (so a different subscription's
-  // cached data — which would be the same data anyway — doesn't surprise
-  // the user; also resets the rate-limit cooldown which was for the old key).
-  useEffect(() => {
-    clearApiCache();
-    setRateLimitUntil(null);
-  }, [settings.rapidApiKey]);
 
   // Register a global rate-limit listener so a 429 from ANY caller
   // (list-by-date, details, PBP) pauses the dashboard polling, manual
