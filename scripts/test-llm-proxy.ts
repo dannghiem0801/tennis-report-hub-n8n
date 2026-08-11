@@ -18,6 +18,7 @@ async function main(): Promise<void> {
   const originalWindow = Object.getOwnPropertyDescriptor(globalThis, "window");
   let requestedUrl = "";
   let requestedHeaders: Headers | undefined;
+  let requestedBody = "";
 
   Object.defineProperty(globalThis, "window", {
     configurable: true,
@@ -26,6 +27,7 @@ async function main(): Promise<void> {
   globalThis.fetch = async (input, init) => {
     requestedUrl = String(input);
     requestedHeaders = new Headers(init?.headers);
+    requestedBody = String(init?.body ?? "");
     return new Response(JSON.stringify({
       id: "test-message",
       type: "message",
@@ -45,7 +47,7 @@ async function main(): Promise<void> {
     model: "MiniMax-M3",
     maxTokens: 500,
     enableThinking: true,
-    enableWebSearch: false,
+    enableWebSearch: true,
   };
 
   const productionDefault = getDefaultLLMConfig({ useServerProxy: true });
@@ -64,6 +66,7 @@ async function main(): Promise<void> {
     const result = await callLLM({ prompt: "Viết một bản tin kiểm thử.", config, disableTools: true });
     assert(requestedUrl === "/api/llm/v1/messages", `expected production proxy URL, got ${requestedUrl}`);
     assert(requestedHeaders?.get("x-api-key") === null, "browser must not send an LLM API key to the server proxy");
+    assert(!requestedBody.includes("\"tools\""), "report calls with disableTools must not send tool definitions upstream");
     assert(result.finishReason === "end_turn", `expected end_turn, got ${result.finishReason}`);
     console.log("✅ production proxy accepts an Anthropic config without a browser API key");
   } finally {

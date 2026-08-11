@@ -357,7 +357,11 @@ async function callAnthropicInner(opts: CallLLMOptions): Promise<CallLLMResult> 
   //
   // Current implementation: stub. The user can wire up a real
   // search backend by replacing `executeWebSearch` below.
-  const webSearchEnabled = config.enableWebSearch !== false;
+  // Report generation supplies a closed, pre-fetched evidence envelope.
+  // Do not even declare browser tools for that path: a model can spend an
+  // entire turn planning tool work despite the caller rejecting it later.
+  const toolsAllowed = opts.disableTools === false;
+  const webSearchEnabled = toolsAllowed && config.enableWebSearch !== false;
   const tools = webSearchEnabled
     ? [
         {
@@ -425,7 +429,6 @@ async function callAnthropicInner(opts: CallLLMOptions): Promise<CallLLMResult> 
   // Tools are disabled by default in the structured report pipeline.
   // Existing settings UI still exposes the toggle, so callers that
   // want web search must opt in explicitly via `disableTools: false`.
-  const toolsAllowed = opts.disableTools === false;
   const startedAtOuter = Date.now();
   let turnsExecuted = 0;
 

@@ -21,12 +21,10 @@ import {
   type ValidationResult,
 } from "./validate";
 
-/** Per-call max_tokens budget. The Anthropic-compatible provider advertises
- *  a 1M context window, so we let the model produce up to 1M output
- *  tokens per call. The validator and repair loop still gate
- *  publication, so a long response is harmless as long as it parses
- *  as a JSON envelope. */
-const LLM_MAX_TOKENS = 1_000_000;
+/** Per-call report budget. A published article is 200-400 words, so a
+ *  bounded budget prevents a reasoning model from consuming minutes of
+ *  upstream time on an unusably long draft or hidden reasoning trace. */
+const LLM_MAX_TOKENS = 16_384;
 /** Validator + prompt bundle version. Bump whenever the
  *  validator/prompt schema changes in an incompatible way. */
 export const VALIDATOR_VERSION = "publication-safe-v1";

@@ -37,7 +37,9 @@ import type { VercelRequest, VercelResponse } from "@vercel/node";
 
 const ANTHROPIC_API_VERSION = process.env.LLM_UPSTREAM_API_VERSION ?? "2023-06-01";
 const DEFAULT_UPSTREAM_BASE = "https://api.minimax.io/anthropic";
-const DEFAULT_TIMEOUT_MS = 180_000; // 3 minutes — match client default
+// Leave a small margin below Vercel's 300s function limit. The browser uses
+// the same 300s ceiling, so the proxy can return a meaningful 504 itself.
+const DEFAULT_TIMEOUT_MS = 270_000;
 
 function setCors(res: VercelResponse): void {
   res.setHeader("Access-Control-Allow-Origin", "*");
