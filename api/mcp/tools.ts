@@ -2,7 +2,7 @@
  * explicit RAPID_MCP_ALLOWED_TOOLS allowlist; it never invokes an API tool. */
 
 import type { VercelRequest, VercelResponse } from "@vercel/node";
-import { getRapidMcpConfig, RapidMcpClient, RapidMcpError } from "./rapidapi";
+import { getRapidMcpConfig, RapidMcpClient, RapidMcpError } from "./rapidapi.js";
 
 export default async function handler(req: VercelRequest, res: VercelResponse): Promise<void> {
   if (req.method !== "GET") {

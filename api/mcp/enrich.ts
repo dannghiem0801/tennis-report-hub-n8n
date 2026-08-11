@@ -13,7 +13,7 @@ import {
   getRapidMcpConfig,
   RapidMcpClient,
   RapidMcpError,
-} from "./rapidapi";
+} from "./rapidapi.js";
 
 interface RequestedTool {
   name: string;
