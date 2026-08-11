@@ -273,6 +273,29 @@ export function ReportViewer({ matchId, onClose }: ReportViewerProps) {
             </div>
           )}
 
+          {!isPrompt && report.quality && (report.quality.mcpSources?.length ?? 0) > 0 && (
+            <div className="mt-3 rounded-md border border-slate-800 bg-slate-900/40 p-3">
+              <h4 className="flex items-center gap-1.5 text-[12px] font-semibold text-slate-200">
+                <FileText className="h-3.5 w-3.5" />
+                Dữ liệu RapidAPI bổ sung ({report.quality.mcpSources!.length})
+              </h4>
+              <ul className="mt-2 space-y-1.5">
+                {report.quality.mcpSources!.map((source) => (
+                  <li key={source.evidenceId} className="flex flex-wrap items-center gap-1.5 text-[11px] text-slate-400">
+                    <code className="rounded bg-slate-800/70 px-1 py-0.5 font-mono text-[10px] text-slate-300">
+                      {source.evidenceId}
+                    </code>
+                    <span>{source.toolName}</span>
+                    <span className="text-slate-500">{formatDateVi(new Date(source.fetchedAt))}</span>
+                  </li>
+                ))}
+              </ul>
+              <p className="mt-2 text-[10px] text-slate-500">
+                Chỉ được gọi khi dữ liệu trận đấu ban đầu còn thiếu; khóa RapidAPI không rời máy chủ.
+              </p>
+            </div>
+          )}
+
           {/* Point-by-point tabbed viewer — only when we have PBP data
               (match was added to the watchlist and PBP fetch succeeded). */}
           {!isPrompt && (match as TennisMatch).pointByPoint && (match as TennisMatch).pointByPoint!.sets.length > 0 && (

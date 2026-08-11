@@ -71,6 +71,8 @@ export interface TennisMatchEvidence {
   tacticalTimeline: TennisTacticalTimeline | null;
   /** External sources we pre-fetched. */
   sources: ExternalSourceEvidence[];
+  /** Missing match data fetched through the server-side RapidAPI MCP bridge. */
+  mcp: McpEvidence[];
   /** Free-form notes about data quality. Empty when nothing to flag. */
   limitations: string[];
 }
@@ -126,6 +128,8 @@ export interface FootballMatchEvidence {
   matchEvents: FootballEvents | null;
   /** External sources. */
   sources: ExternalSourceEvidence[];
+  /** Missing match data fetched through the server-side RapidAPI MCP bridge. */
+  mcp: McpEvidence[];
   limitations: string[];
 }
 
@@ -149,6 +153,15 @@ export interface ExternalSourceEvidence {
   /** Did the system verify that this source mentions BOTH participants
    *  and at least one canonical score form? */
   verified: boolean;
+}
+
+/** Read-only data returned by the server-side RapidAPI MCP bridge. */
+export interface McpEvidence {
+  evidenceId: EvidenceId;
+  toolName: string;
+  fetchedAt: string;
+  /** Bounded tool-returned JSON/text. Claims must be supported by this data. */
+  content: string;
 }
 
 export type MatchEvidence = TennisMatchEvidence | FootballMatchEvidence;
@@ -370,7 +383,8 @@ function buildTennisStatistics(stats: TennisMatchStats | undefined): TennisStatF
 
 export function buildTennisEvidence(
   match: TennisMatch,
-  sources: FirecrawlSource[]
+  sources: FirecrawlSource[],
+  mcpEvidence: McpEvidence[] = []
 ): TennisMatchEvidence {
   const evidenceIds: EvidenceId[] = ["facts"];
   const limitations: string[] = [];
@@ -454,6 +468,8 @@ export function buildTennisEvidence(
     verified: verifySourceForMatch({ title: s.title, excerpt: s.excerpt }, match),
   }));
   for (const s of externalSources) evidenceIds.push(s.evidenceId);
+  const mcp = sanitizeMcpEvidence(mcpEvidence);
+  for (const item of mcp) evidenceIds.push(item.evidenceId);
 
   return {
     sport: "tennis",
@@ -462,6 +478,7 @@ export function buildTennisEvidence(
     statistics,
     tacticalTimeline,
     sources: externalSources,
+    mcp,
     limitations,
   };
 }
@@ -558,7 +575,8 @@ function validateFootballEvents(
 
 export function buildFootballEvidence(
   match: FootballMatch,
-  sources: FirecrawlSource[]
+  sources: FirecrawlSource[],
+  mcpEvidence: McpEvidence[] = []
 ): FootballMatchEvidence {
   const evidenceIds: EvidenceId[] = ["facts"];
   const limitations: string[] = [];
@@ -624,6 +642,8 @@ export function buildFootballEvidence(
     verified: verifySourceForMatch({ title: s.title, excerpt: s.excerpt }, match),
   }));
   for (const s of externalSources) evidenceIds.push(s.evidenceId);
+  const mcp = sanitizeMcpEvidence(mcpEvidence);
+  for (const item of mcp) evidenceIds.push(item.evidenceId);
 
   return {
     sport: "football",
@@ -632,15 +652,52 @@ export function buildFootballEvidence(
     statistics,
     matchEvents,
     sources: externalSources,
+    mcp,
     limitations,
   };
 }
 
 // ---- Public dispatcher ---------------------------------------------------
 
-export function buildMatchEvidence(match: Match, sources: FirecrawlSource[]): MatchEvidence {
-  if (match.sport === "football") return buildFootballEvidence(match, sources);
-  return buildTennisEvidence(match, sources);
+export function buildMatchEvidence(
+  match: Match,
+  sources: FirecrawlSource[],
+  mcpEvidence: McpEvidence[] = []
+): MatchEvidence {
+  if (match.sport === "football") return buildFootballEvidence(match, sources, mcpEvidence);
+  return buildTennisEvidence(match, sources, mcpEvidence);
+}
+
+const MAX_MCP_EVIDENCE_ITEMS = 4;
+const MAX_MCP_CONTENT_CHARS = 6_000;
+
+function sanitizeMcpEvidence(items: McpEvidence[]): McpEvidence[] {
+  const seen = new Set<string>();
+  const valid: McpEvidence[] = [];
+  for (const item of items) {
+    if (
+      valid.length >= MAX_MCP_EVIDENCE_ITEMS ||
+      !item ||
+      typeof item.evidenceId !== "string" ||
+      !/^mcp-\d+$/.test(item.evidenceId) ||
+      seen.has(item.evidenceId) ||
+      typeof item.toolName !== "string" ||
+      !item.toolName.trim() ||
+      typeof item.fetchedAt !== "string" ||
+      typeof item.content !== "string" ||
+      !item.content.trim()
+    ) {
+      continue;
+    }
+    seen.add(item.evidenceId);
+    valid.push({
+      evidenceId: item.evidenceId,
+      toolName: item.toolName.trim().slice(0, 128),
+      fetchedAt: item.fetchedAt,
+      content: item.content.slice(0, MAX_MCP_CONTENT_CHARS),
+    });
+  }
+  return valid;
 }
 
 /** Serialize evidence as a compact JSON block. Used by the report

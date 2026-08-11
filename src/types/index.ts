@@ -292,6 +292,12 @@ export interface ReportQuality {
     title: string;
     verified: boolean;
   }>;
+  /** RapidAPI MCP calls used to fill otherwise missing match evidence. */
+  mcpSources?: Array<{
+    evidenceId: string;
+    toolName: string;
+    fetchedAt: string;
+  }>;
   /** Validator + prompt bundle version that produced this report. */
   validatorVersion: string;
   /** Optional latency / token observability for the safety pipeline. */

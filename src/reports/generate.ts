@@ -11,7 +11,8 @@ import { buildPromptContextWithSources, getDefaultTemplate } from "./templates";
 import { uid } from "@/lib/utils";
 import { callLLM, isLLMConfigured, LLMError } from "@/api/llm";
 import { buildMatchQueries, fetchMatchSources, type FirecrawlSource } from "@/api/firecrawl";
-import { buildMatchEvidence, type MatchEvidence } from "./evidence";
+import { buildMatchEvidence, type MatchEvidence, type McpEvidence } from "./evidence";
+import { fetchMcpEvidence, selectMcpRequests } from "./mcp-enrichment";
 import {
   buildRepairPrompt,
   parseEnvelope,
@@ -653,8 +654,23 @@ export async function applyTemplate(
   // 1. Build evidence (without sources initially).
   const baseEvidence: MatchEvidence = buildMatchEvidence(match, []);
 
-  // 2. Pre-fetch external sources (only when a Firecrawl key is set).
+  // 2. Recover only missing match evidence through the server-side MCP bridge.
+  // This is deliberately deterministic and bounded; the final writer still
+  // receives a closed evidence envelope with tools disabled.
   const pipelineStart = Date.now();
+  let mcpEvidence: McpEvidence[] = [];
+  const mcpRequests = selectMcpRequests(match);
+  if (mcpRequests.length > 0) {
+    const stageStart = Date.now();
+    mcpEvidence = await fetchMcpEvidence(match, { signal: options?.signal });
+    // eslint-disable-next-line no-console
+    console.log(
+      `[generate] match=${match.id} rapid-mcp stage: ${mcpEvidence.length}/${mcpRequests.length} evidence item(s), ` +
+      `${(Date.now() - stageStart) / 1000}s`
+    );
+  }
+
+  // 3. Pre-fetch external sources (only when a Firecrawl key is set).
   let sources: FirecrawlSource[] = [];
   if (llmConfig?.searchApiKey) {
     try {
@@ -679,17 +695,17 @@ export async function applyTemplate(
       );
     }
   }
-  // Re-build evidence with the freshly-fetched sources so the JSON
-  // envelope the LLM sees contains the verified excerpts.
-  const evidence: MatchEvidence = sources.length
-    ? buildMatchEvidence(match, sources)
+  // Re-build evidence so the JSON envelope includes both verified web excerpts
+  // and any bounded, server-fetched Rapid MCP data.
+  const evidence: MatchEvidence = sources.length || mcpEvidence.length
+    ? buildMatchEvidence(match, sources, mcpEvidence)
     : baseEvidence;
 
   // 3. Build the prompt. The template persona + rules + the JSON
   // envelope go in one document. Tools are disabled by default; the
   // LLM must answer from the envelope alone.
   const persona = template.content.trim();
-  const fullPrompt = `${persona}\n${buildPromptContextWithSources(match, sources)}\n`;
+  const fullPrompt = `${persona}\n${buildPromptContextWithSources(match, sources, mcpEvidence)}\n`;
 
   if (!isLLMConfigured(llmConfig)) {
     // No LLM configured — preserve the existing prompt fallback.
@@ -814,6 +830,11 @@ export async function applyTemplate(
       url: s.url,
       title: s.title,
       verified: evidence.sources.find((es) => es.evidenceId === s.evidenceId)?.verified ?? false,
+    })),
+    mcpSources: evidence.mcp.map((item) => ({
+      evidenceId: item.evidenceId,
+      toolName: item.toolName,
+      fetchedAt: item.fetchedAt,
     })),
     validatorVersion: VALIDATOR_VERSION,
     observability: totalObservability,

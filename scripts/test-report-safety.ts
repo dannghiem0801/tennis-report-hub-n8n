@@ -22,6 +22,7 @@ import {
   buildTennisEvidence,
   type MatchEvidence,
 } from "../src/reports/evidence";
+import { selectMcpRequests } from "../src/reports/mcp-enrichment";
 import {
   FIRECRAWL_MAX_SOURCES,
   fetchMatchSources,
@@ -781,6 +782,46 @@ test("legacy report (no quality) keeps copyable behavior", () => {
 });
 
 console.log("\n=== Dispatcher ===\n");
+
+test("MCP enrichment: requests only the missing tennis data within the cap", () => {
+  const match = baseTennisMatch();
+  delete match.stats;
+  const requests = selectMcpRequests(match);
+  assertEq(requests.length, 2, "two bounded tool calls");
+  assertEq(requests[0]?.name, "Get_Match_Stats", "stats is first missing field");
+  assertEq(requests[1]?.name, "Get_Match_Point_by_Point", "PBP is second missing field");
+  assertEq(requests[0]?.arguments.match_id, match.id, "match id passed to MCP");
+});
+
+test("MCP enrichment: skips complete evidence and non-completed matches", () => {
+  const complete = baseTennisMatch();
+  complete.pointByPoint = { sets: [] };
+  assertEq(selectMcpRequests(complete).length, 1, "empty PBP needs enrichment");
+  complete.pointByPoint = { sets: [{ setNumber: 1, name: "Set 1", games: [] }] };
+  assertEq(selectMcpRequests(complete).length, 0, "complete evidence needs no MCP");
+  complete.status = "live";
+  delete complete.stats;
+  assertEq(selectMcpRequests(complete).length, 0, "live match never calls MCP");
+});
+
+test("MCP evidence: enters the validated envelope as API-only evidence", () => {
+  const match = baseTennisMatch();
+  const evidence = buildTennisEvidence(match, [], [{
+    evidenceId: "mcp-0",
+    toolName: "Get_Match_Point_by_Point",
+    fetchedAt: "2026-08-11T00:00:00.000Z",
+    content: "[{\\\"set\\\":1,\\\"games\\\":12}]",
+  }]);
+  assert(evidence.evidenceIds.includes("mcp-0"), "MCP id is allowed evidence");
+  assertEq(evidence.mcp.length, 1, "MCP payload retained");
+  const env = parseEnvelope(JSON.stringify({
+    articleMarkdown: "Jakub Mensik đánh bại Botic van de Zandschulp 6-4, 7-5 tại ATP Montreal.",
+    sourceMode: "api-only",
+    evidenceIdsUsed: ["facts", "mcp-0"],
+  }));
+  const result = validateEnvelope(env!, evidence);
+  assert(!result.issues.some((issue) => issue.code === "unknown_evidence_id"), "MCP id accepted by validator");
+});
 
 test("buildMatchEvidence: dispatches on sport", () => {
   const t = baseTennisMatch();
