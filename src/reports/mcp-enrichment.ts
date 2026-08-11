@@ -51,9 +51,9 @@ export function selectMcpRequests(match: Match): McpToolRequest[] {
   };
 
   if (match.sport === "football") {
-    // Football currently receives its score from list-by-date. Details and
-    // statistics add the event-level and tactical context needed for a recap.
-    add("Get_Match_Details");
+    // The server resolves this semantic request to RapidAPI's dedicated
+    // summary tool where available, or safely falls back to match details.
+    add("Get_Match_Summary");
     add("Get_Match_Stats");
     return requests;
   }

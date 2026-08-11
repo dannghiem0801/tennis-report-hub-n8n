@@ -20,6 +20,22 @@ interface RequestedTool {
   arguments: Record<string, unknown>;
 }
 
+const TOOL_FALLBACKS: Record<string, string[]> = {
+  // The RapidAPI catalog can expose a dedicated football match summary. Older
+  // Flashscore applications may not have it, so retain the already-configured
+  // details tool as a deterministic read-only fallback.
+  Get_Match_Summary: ["Get_Match_Summary", "Get_Match_Details"],
+};
+
+export function resolveRequestedToolName(
+  requestedName: string,
+  allowedTools: string[],
+  availableTools: Set<string>
+): string | null {
+  const candidates = TOOL_FALLBACKS[requestedName] ?? [requestedName];
+  return candidates.find((name) => allowedTools.includes(name) && availableTools.has(name)) ?? null;
+}
+
 function setCors(res: VercelResponse): void {
   res.setHeader("Access-Control-Allow-Origin", "*");
   res.setHeader("Access-Control-Allow-Methods", "POST, OPTIONS");
@@ -82,13 +98,14 @@ export default async function handler(req: VercelRequest, res: VercelResponse): 
     }> = [];
     for (let index = 0; index < requests.length; index += 1) {
       const request = requests[index];
-      if (!config.allowedTools.includes(request.name) || !availableTools.has(request.name)) {
+      const toolName = resolveRequestedToolName(request.name, config.allowedTools, availableTools);
+      if (!toolName) {
         throw new RapidMcpError(`Tool MCP không được cấu hình hoặc không được phép: ${request.name}`, 403);
       }
-      const result = await client.callTool(request.name, request.arguments);
+      const result = await client.callTool(toolName, request.arguments);
       results.push({
         evidenceId: `mcp-${index}`,
-        toolName: request.name,
+        toolName,
         fetchedAt,
         verified: !result.isError,
         content: compactToolResult(result),

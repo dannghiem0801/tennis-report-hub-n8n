@@ -796,7 +796,7 @@ test("MCP enrichment: enriches every completed football match within the cap", (
   const match = baseFootballMatch();
   const requests = selectMcpRequests(match);
   assertEq(requests.length, 2, "two bounded tool calls");
-  assertEq(requests[0]?.name, "Get_Match_Details", "details are first for football");
+  assertEq(requests[0]?.name, "Get_Match_Summary", "summary is first for football");
   assertEq(requests[1]?.name, "Get_Match_Stats", "stats are second for football");
   assertEq(requests[0]?.arguments.match_id, match.id, "match id passed to MCP");
 });
