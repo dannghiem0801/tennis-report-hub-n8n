@@ -7,7 +7,8 @@
  * report remains a valid fallback when MCP is disabled or unavailable.
  */
 
-import type { Match } from "@/types";
+import type { Match, TennisMatch } from "@/types";
+import { mapMatchDetails, type TennisPlayerIdentity } from "@/api/flashscore-mapper";
 import type { McpEvidence } from "./evidence";
 
 const ENRICHMENT_URL = "/api/mcp/enrich";
@@ -19,6 +20,54 @@ export interface McpToolRequest {
   arguments: { match_id: string };
   /** Optional sources must never block the required evidence set. */
   optional?: boolean;
+}
+
+function parseMcpJson(content: string): unknown | null {
+  const candidates = [content.trim()];
+  const fenced = content.match(/```(?:json)?\s*([\s\S]*?)```/i)?.[1]?.trim();
+  if (fenced) candidates.push(fenced);
+  for (const candidate of candidates) {
+    try {
+      return JSON.parse(candidate) as unknown;
+    } catch {
+      // MCP tools may prepend a short status line. In that case the raw
+      // evidence remains available to the LLM, but no identity is inferred.
+    }
+  }
+  return null;
+}
+
+function applyIdentity(
+  player: TennisMatch["player1"],
+  identity: TennisPlayerIdentity | undefined
+): TennisMatch["player1"] {
+  if (!identity) return player;
+  return {
+    ...player,
+    ...(identity.fullName ? { fullName: identity.fullName } : {}),
+    ...(identity.ranking !== undefined ? { ranking: identity.ranking } : {}),
+    ...(identity.seed !== undefined ? { seed: identity.seed } : {}),
+  };
+}
+
+/**
+ * Promote explicit identity values from Get_Match_Details into canonical
+ * tennis facts. No name or seed is guessed: non-JSON or abbreviated output
+ * stays only as MCP provenance rather than overwriting the match record.
+ */
+export function applyMcpTennisMatchDetails(match: Match, evidence: McpEvidence[]): Match {
+  if (match.sport !== "tennis") return match;
+  const detail = evidence.find((item) => item.toolName === "Get_Match_Details");
+  if (!detail) return match;
+  const payload = parseMcpJson(detail.content);
+  if (!payload || typeof payload !== "object") return match;
+  const details = mapMatchDetails(payload, { logMissingSets: false });
+  if (!details.player1 && !details.player2) return match;
+  return {
+    ...match,
+    player1: applyIdentity(match.player1, details.player1),
+    player2: applyIdentity(match.player2, details.player2),
+  };
 }
 
 interface EnrichmentResponse {

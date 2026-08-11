@@ -12,7 +12,7 @@ import { uid } from "@/lib/utils";
 import { callLLM, isLLMConfigured, LLMError } from "@/api/llm";
 import { buildMatchQueries, fetchMatchSources, type FirecrawlSource } from "@/api/firecrawl";
 import { buildMatchEvidence, type MatchEvidence, type McpEvidence } from "./evidence";
-import { fetchMcpEvidence, selectMcpRequests } from "./mcp-enrichment";
+import { applyMcpTennisMatchDetails, fetchMcpEvidence, selectMcpRequests } from "./mcp-enrichment";
 import {
   buildRepairPrompt,
   parseEnvelope,
@@ -633,6 +633,8 @@ export interface ApplyTemplateResult {
   llmError?: string;
   llmModel?: string;
   quality?: ReportQuality;
+  /** Match fact record after explicit MCP identity enrichment, if available. */
+  enrichedMatch?: Match;
 }
 
 export async function applyTemplate(
@@ -670,6 +672,8 @@ export async function applyTemplate(
     );
   }
 
+  const enrichedMatch = applyMcpTennisMatchDetails(match, mcpEvidence);
+
   // 3. Pre-fetch external sources (only when a Firecrawl key is set).
   let sources: FirecrawlSource[] = [];
   if (llmConfig?.searchApiKey) {
@@ -677,7 +681,7 @@ export async function applyTemplate(
       const stageStart = Date.now();
       const fetched = await fetchMatchSources({
         apiKey: llmConfig.searchApiKey,
-        queries: buildMatchQueries(match),
+        queries: buildMatchQueries(enrichedMatch),
         signal: options?.signal,
       });
       sources = fetched.sources;
@@ -698,18 +702,18 @@ export async function applyTemplate(
   // Re-build evidence so the JSON envelope includes both verified web excerpts
   // and any bounded, server-fetched Rapid MCP data.
   const evidence: MatchEvidence = sources.length || mcpEvidence.length
-    ? buildMatchEvidence(match, sources, mcpEvidence)
+    ? buildMatchEvidence(enrichedMatch, sources, mcpEvidence)
     : baseEvidence;
 
   // 3. Build the prompt. The template persona + rules + the JSON
   // envelope go in one document. Tools are disabled by default; the
   // LLM must answer from the envelope alone.
   const persona = template.content.trim();
-  const fullPrompt = `${persona}\n${buildPromptContextWithSources(match, sources, mcpEvidence)}\n`;
+  const fullPrompt = `${persona}\n${buildPromptContextWithSources(enrichedMatch, sources, mcpEvidence)}\n`;
 
   if (!isLLMConfigured(llmConfig)) {
     // No LLM configured — preserve the existing prompt fallback.
-    return { content: fullPrompt, isPrompt: true };
+    return { content: fullPrompt, isPrompt: true, enrichedMatch };
   }
 
   // Cap max_tokens per request; the safety budget is small so the
@@ -741,7 +745,7 @@ export async function applyTemplate(
     console.log(
       `[generate] match=${match.id} LLM first-call failed after ${(Date.now() - draftStart) / 1000}s: ${msg}`
     );
-    return { content: fullPrompt, isPrompt: true, llmError: msg };
+    return { content: fullPrompt, isPrompt: true, llmError: msg, enrichedMatch };
   }
   // eslint-disable-next-line no-console
   console.log(
@@ -846,6 +850,7 @@ export async function applyTemplate(
       isPrompt: true,
       llmModel: lastResult?.model,
       quality,
+      enrichedMatch,
     };
   }
 
@@ -854,6 +859,7 @@ export async function applyTemplate(
     isPrompt: false,
     llmModel: lastResult?.model,
     quality,
+    enrichedMatch,
   };
 }
 
@@ -895,14 +901,15 @@ export async function generateReport({ match, templates, settings, watchlistId, 
     ? templates.find((t) => t.id === sportPromptTemplateId) ?? getDefaultTemplate(templates, sport)
     : getDefaultTemplate(templates, sport);
 
-  const winner = getMatchWinner(match);
-  const { content, isPrompt, llmError, llmModel, quality } = await applyTemplate(
+  const { content, isPrompt, llmError, llmModel, quality, enrichedMatch } = await applyTemplate(
     template,
     match,
     settings.llm,
     { signal: undefined }
   );
-  const title = generateTitle(match, winner);
+  const reportMatch = enrichedMatch ?? match;
+  const winner = getMatchWinner(reportMatch);
+  const title = generateTitle(reportMatch, winner);
   if (llmAvailable) {
     if (template.id !== sportPromptTemplateId) {
       console.warn(
@@ -928,7 +935,7 @@ export async function generateReport({ match, templates, settings, watchlistId, 
     sport,
     title,
     content,
-    match,
+    match: reportMatch,
     generatedAt: new Date().toISOString(),
     isNew: true,
     templateId: template.id,

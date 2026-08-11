@@ -684,6 +684,77 @@ export interface MappedMatchDetails {
   finalScore?: string;
   /** Total match duration in minutes. */
   matchDurationMinutes?: number;
+  /** Canonical identity fields from the match-details response. */
+  player1?: TennisPlayerIdentity;
+  /** Canonical identity fields from the match-details response. */
+  player2?: TennisPlayerIdentity;
+}
+
+export interface TennisPlayerIdentity {
+  fullName?: string;
+  ranking?: number;
+  seed?: number;
+}
+
+function isLikelyAbbreviatedPlayerName(value: string): boolean {
+  return /(?:^|\s)[A-Z]\.(?:\s|$)/.test(value);
+}
+
+function extractPositiveInteger(value: unknown, maximum: number): number | undefined {
+  if (typeof value === "number" && Number.isInteger(value) && value > 0 && value <= maximum) return value;
+  if (typeof value === "string" && /^\s*#?\d+\s*$/.test(value)) {
+    const parsed = Number(value.replace(/[^\d]/g, ""));
+    return Number.isInteger(parsed) && parsed > 0 && parsed <= maximum ? parsed : undefined;
+  }
+  return undefined;
+}
+
+function extractTennisPlayerIdentity(
+  obj: unknown,
+  side: "home" | "away"
+): TennisPlayerIdentity | undefined {
+  const sideNumber = side === "home" ? "1" : "2";
+  const participant = extractField<unknown>(obj, side === "home"
+    ? ["home_team", "homeTeam", "home_player", "homePlayer", "player1", "players.home", "teams.home"]
+    : ["away_team", "awayTeam", "away_player", "awayPlayer", "player2", "players.away", "teams.away"]
+  );
+  const source = participant && typeof participant === "object" ? participant : obj;
+  const prefix = side === "home" ? "home" : "away";
+  const fullName = extractField<unknown>(source, [
+    "full_name", "fullName", "long_name", "longName", "name_full", "nameFull", "player_name", "playerName", "name",
+  ]);
+  const name = typeof fullName === "string" ? fullName.trim() : "";
+  const identity: TennisPlayerIdentity = {};
+  if (name && !isLikelyAbbreviatedPlayerName(name) && name.length <= 120) {
+    identity.fullName = name;
+  } else {
+    const topLevelName = extractField<unknown>(obj, [
+      `${prefix}_full_name`, `${prefix}FullName`, `${prefix}_player_name`, `${prefix}PlayerName`,
+      `player${sideNumber}_full_name`, `player${sideNumber}FullName`,
+    ]);
+    if (typeof topLevelName === "string") {
+      const candidate = topLevelName.trim();
+      if (candidate && !isLikelyAbbreviatedPlayerName(candidate) && candidate.length <= 120) identity.fullName = candidate;
+    }
+  }
+
+  const seed = extractPositiveInteger(extractField<unknown>(source, [
+    "seed", "seed_number", "seedNumber", "seed_no", "seedNo", "seeding", "tournament_seed", "tournamentSeed",
+  ]), 128) ?? extractPositiveInteger(extractField<unknown>(obj, [
+    `${prefix}_seed`, `${prefix}Seed`, `${prefix}_seed_number`, `${prefix}SeedNumber`,
+    `player${sideNumber}_seed`, `player${sideNumber}Seed`,
+  ]), 128);
+  if (seed !== undefined) identity.seed = seed;
+
+  const ranking = extractPositiveInteger(extractField<unknown>(source, [
+    "ranking", "rank", "world_ranking", "worldRanking", "ranking_position", "rankingPosition",
+  ]), 3_000) ?? extractPositiveInteger(extractField<unknown>(obj, [
+    `${prefix}_ranking`, `${prefix}Ranking`, `${prefix}_rank`, `${prefix}Rank`,
+    `player${sideNumber}_ranking`, `player${sideNumber}Ranking`,
+  ]), 3_000);
+  if (ranking !== undefined) identity.ranking = ranking;
+
+  return Object.keys(identity).length > 0 ? identity : undefined;
 }
 
 function extractFirstNumber(obj: unknown, paths: string[]): number | undefined {
@@ -833,7 +904,10 @@ function findSetsArray(payload: unknown, depth = 0): any[] | null {
  * missing fields as "not exposed by the API" and fall back to scratch data
  * from list-by-date.
  */
-export function mapMatchDetails(payload: unknown): MappedMatchDetails {
+export function mapMatchDetails(
+  payload: unknown,
+  options: { logMissingSets?: boolean } = {}
+): MappedMatchDetails {
   if (!payload || typeof payload !== "object") return {};
 
   // Some APIs wrap details in { data: {...} } or { match: {...} } or
@@ -842,6 +916,8 @@ export function mapMatchDetails(payload: unknown): MappedMatchDetails {
   const obj = findSetsNode(payload) ?? unwrapOneLevel(payload) ?? payload;
 
   const out: MappedMatchDetails = {};
+  out.player1 = extractTennisPlayerIdentity(obj, "home");
+  out.player2 = extractTennisPlayerIdentity(obj, "away");
 
   /* ---------------------------------------------------------------- */
   /*  Per-set scores                                                   */
@@ -883,7 +959,6 @@ export function mapMatchDetails(payload: unknown): MappedMatchDetails {
 
   if (flatFieldSets && flatFieldSets.length > 0) {
     out.sets = flatFieldSets;
-    return out; // got everything we need from this endpoint
   }
 
   // PATTERN A–G (other APIs): array-based
@@ -898,7 +973,7 @@ export function mapMatchDetails(payload: unknown): MappedMatchDetails {
     extractField<unknown[]>(obj, ["sets", "set_scores", "period_scores", "periods", "setResults", "score_history"]) ??
     extractField<unknown>(obj, ["scores.sets", "score.sets", "result.sets", "score_detail.sets"]) as unknown[] | undefined;
 
-  if (Array.isArray(setsRaw) && setsRaw.length > 0) {
+  if (!out.sets && Array.isArray(setsRaw) && setsRaw.length > 0) {
     const sets: SetScore[] = [];
     for (const s of setsRaw) {
       if (!s || typeof s !== "object") continue;
@@ -938,7 +1013,7 @@ export function mapMatchDetails(payload: unknown): MappedMatchDetails {
         JSON.stringify(setsRaw[0]).slice(0, 300)
       );
     }
-  } else {
+  } else if (!out.sets) {
     // Diagnostic: no sets found by direct path. Try the aggressive tree
     // walker as a last resort — look for any array of pair-objects in the
     // payload tree. If even that fails, log enough of the response for
@@ -961,15 +1036,16 @@ export function mapMatchDetails(payload: unknown): MappedMatchDetails {
       }
       if (sets.length > 0) {
         out.sets = sets;
-        return out; // skip the rest of the function, we have what we need
       }
     }
     // No sets found anywhere. Log enough of the response for debugging.
     // eslint-disable-next-line no-console
-    console.warn(
-      `[flashscore-details] No sets found. Top-level keys: ${payload && typeof payload === "object" ? Object.keys(payload).join(", ") : "(none)"}.` +
-        `\n  Full response:\n${JSON.stringify(payload, null, 2).slice(0, 3000)}`
-    );
+    if (options.logMissingSets !== false) {
+      console.warn(
+        `[flashscore-details] No sets found. Top-level keys: ${payload && typeof payload === "object" ? Object.keys(payload).join(", ") : "(none)"}.` +
+          `\n  Full response:\n${JSON.stringify(payload, null, 2).slice(0, 3000)}`
+      );
+    }
   }
 
   /* ---------------------------------------------------------------- */

@@ -136,8 +136,8 @@ const detailsSample = {
     final_winner: "home",
   },
   timestamp: 1785645594,
-  home_team: { team_id: "M5Nr6FTR", name: "Gea A.", short_name: "GEA" },
-  away_team: { team_id: "zXddgn9o", name: "Shapovalov D.", short_name: "SHA" },
+  home_team: { team_id: "M5Nr6FTR", name: "Gea A.", full_name: "Arthur Gea", seed: 12, short_name: "GEA" },
+  away_team: { team_id: "zXddgn9o", name: "Shapovalov D.", full_name: "Denis Shapovalov", seed_number: "6", short_name: "SHA" },
   scores: {
     home: 2,
     away: 0,
@@ -298,6 +298,16 @@ test("Details: skipped null sets 3-5", () => {
 test("Details: match duration parsed = 90 minutes (1:30)", () => {
   assert(details !== null, "null");
   assertEq(details.matchDurationMinutes, 90, "match duration");
+});
+
+test("Details: extracts full player names without retaining abbreviations", () => {
+  assertEq(details.player1?.fullName, "Arthur Gea", "home full name");
+  assertEq(details.player2?.fullName, "Denis Shapovalov", "away full name");
+});
+
+test("Details: extracts both numeric seeds", () => {
+  assertEq(details.player1?.seed, 12, "home seed");
+  assertEq(details.player2?.seed, 6, "away seed");
 });
 
 // ===== Edge cases =====

@@ -63,6 +63,7 @@ Hệ thống cung cấp MỘT khối JSON envelope ở cuối prompt, ngay sau m
 8. **Word count**: 200-280 từ mặc định, 300-400 từ chi tiết, tối thiểu 150 từ.
 9. **\`evidenceIdsUsed\` chỉ chứa \`facts\` + \`tacticalTimeline\` (nếu có) + \`mcp-i\` thực sự dùng + các \`web-i\` thực sự dùng trong bài.** KHÔNG liệt kê ID không tham chiếu.
 10. **Khi \`sources\` rỗng** thì \`sourceMode = "api-only"\`, không cite "theo [nguồn]".
+11. **Danh tính tay vợt:** Ở đoạn mở đầu, dùng nguyên văn \`facts.player1.fullName\` và \`facts.player2.fullName\` khi có. Nếu \`facts.player*.seed\` là số, ghi đúng "hạt giống số X" cho tay vợt đó; nếu là \`null\`, không tự suy ra hoặc gán hạt giống.
 
 ## Phong cách bản tin
 

@@ -22,7 +22,8 @@ import {
   buildTennisEvidence,
   type MatchEvidence,
 } from "../src/reports/evidence";
-import { selectMcpRequests } from "../src/reports/mcp-enrichment";
+import { applyMcpTennisMatchDetails, selectMcpRequests } from "../src/reports/mcp-enrichment";
+import { DEFAULT_TEMPLATES } from "../src/reports/templates";
 import {
   FIRECRAWL_MAX_SOURCES,
   fetchMatchSources,
@@ -790,6 +791,31 @@ test("MCP enrichment: enriches every completed tennis match within the cap", () 
   assertEq(requests[0]?.name, "Get_Match_Details", "details are first for tennis");
   assertEq(requests[1]?.name, "Get_Match_Point_by_Point", "PBP is second for tennis");
   assertEq(requests[0]?.arguments.match_id, match.id, "match id passed to MCP");
+});
+
+test("MCP enrichment: promotes explicit tennis names and seeds from match details", () => {
+  const match = baseTennisMatch();
+  const enriched = applyMcpTennisMatchDetails(match, [{
+    evidenceId: "mcp-0",
+    toolName: "Get_Match_Details",
+    fetchedAt: "2026-08-11T00:00:00.000Z",
+    content: JSON.stringify({
+      home_team: { name: "Mensik J.", full_name: "Jakub Mensik", seed: 14 },
+      away_team: { name: "van de Zandschulp B.", full_name: "Botic van de Zandschulp", seed_number: "31" },
+    }),
+  }]);
+  assertEq(enriched.sport, "tennis", "tennis identity remains tennis");
+  if (enriched.sport !== "tennis") throw new Error("expected tennis match");
+  assertEq(enriched.player1.fullName, "Jakub Mensik", "full name comes from MCP details");
+  assertEq(enriched.player1.seed, 14, "seed comes from MCP details");
+  assertEq(enriched.player2.fullName, "Botic van de Zandschulp", "away full name comes from MCP details");
+  assertEq(enriched.player2.seed, 31, "away seed comes from MCP details");
+});
+
+test("Tennis prompt requires full names and explicit seeds when available", () => {
+  const tennisPrompt = DEFAULT_TEMPLATES.find((template) => template.id === "tpl-prompt")?.content ?? "";
+  assert(tennisPrompt.includes("facts.player1.fullName"), "prompt requires full player names");
+  assert(tennisPrompt.includes("hạt giống số X"), "prompt requires an explicit seed when supplied");
 });
 
 test("MCP enrichment: enriches every completed football match within the cap", () => {
