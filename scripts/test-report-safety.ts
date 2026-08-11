@@ -787,7 +787,7 @@ test("MCP enrichment: enriches every completed tennis match within the cap", () 
   const match = baseTennisMatch();
   const requests = selectMcpRequests(match);
   assertEq(requests.length, 2, "two bounded tool calls");
-  assertEq(requests[0]?.name, "Get_Match_Stats", "stats are first for tennis");
+  assertEq(requests[0]?.name, "Get_Match_Details", "details are first for tennis");
   assertEq(requests[1]?.name, "Get_Match_Point_by_Point", "PBP is second for tennis");
   assertEq(requests[0]?.arguments.match_id, match.id, "match id passed to MCP");
 });

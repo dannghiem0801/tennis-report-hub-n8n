@@ -62,10 +62,10 @@ export function selectMcpRequests(match: Match): McpToolRequest[] {
     return requests;
   }
 
-  // Tennis already receives set details from the REST adapter. MCP adds
-  // independently fetched statistics and game-by-game context on every
-  // completed report, even when the local cache happens to be populated.
-  add("Get_Match_Stats");
+  // Tennis needs the canonical match record plus game-by-game context.
+  // These are required sources, so a missing tool safely falls back to the
+  // normal API-only report rather than silently substituting another tool.
+  add("Get_Match_Details");
   add("Get_Match_Point_by_Point");
   return requests;
 }
