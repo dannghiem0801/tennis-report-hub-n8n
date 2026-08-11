@@ -37,6 +37,7 @@ const envelope: TennisMatchEvidence = JSON.parse(`{
     "tournamentCategory": "ATP 250",
     "winnerSide": 2,
     "finalScore": [{"player1": 3, "player2": 6}, {"player1": 6, "player2": 7}],
+    "winnerScore": [{"winner": 6, "loser": 3}, {"winner": 7, "loser": 6}],
     "matchDurationMinutes": null
   },
   "statistics": null,

@@ -219,6 +219,24 @@ test("tennis: valid API-only article is accepted", () => {
   assert(r.ok, `expected ok, got issues: ${r.issues.map((i) => i.code).join(",")}`);
 });
 
+test("tennis: rejects a winner claim paired with the losing-perspective full score", () => {
+  const match = baseTennisMatch();
+  const evidence = buildTennisEvidence(match, []);
+  const article = "Jakub Mensik đánh bại Botic van de Zandschulp với tỉ số 4-6, 5-7. " +
+    "Trận đấu tại ATP Montreal diễn ra với nhiều pha bóng giằng co, nhưng Mensik vẫn giữ được sự chủ động trong những thời điểm quan trọng. " +
+    "Chiến thắng giúp Mensik đi tiếp sau hai set và khép lại màn so tài trong điều kiện mặt sân cứng.";
+  const envelope = parseEnvelope(JSON.stringify({
+    articleMarkdown: article,
+    sourceMode: "api-only",
+    evidenceIdsUsed: ["facts"],
+  }));
+  const result = validateEnvelope(envelope!, evidence);
+  assert(
+    result.issues.some((issue) => issue.code === "winner_mismatch" && issue.blocking),
+    "a winner claim must not use the full score in the loser's perspective"
+  );
+});
+
 test("tennis: word count below soft min is warning only", () => {
   const m = baseTennisMatch();
   const ev = buildTennisEvidence(m, []);
@@ -816,6 +834,8 @@ test("Tennis prompt requires full names and explicit seeds when available", () =
   const tennisPrompt = DEFAULT_TEMPLATES.find((template) => template.id === "tpl-prompt")?.content ?? "";
   assert(tennisPrompt.includes("facts.player1.fullName"), "prompt requires full player names");
   assert(tennisPrompt.includes("hạt giống số X"), "prompt requires an explicit seed when supplied");
+  assert(tennisPrompt.includes("winnerScore"), "prompt requires winner-first set scores");
+  assert(tennisPrompt.includes("KHÔNG tự suy ra đối thủ kế tiếp"), "prompt blocks invented next opponents");
 });
 
 test("MCP enrichment: enriches every completed football match within the cap", () => {

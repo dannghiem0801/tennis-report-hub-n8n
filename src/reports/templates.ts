@@ -23,7 +23,7 @@ import { buildMatchEvidence, serializeEvidence, type McpEvidence } from "./evide
  * migration uses it to overwrite stale localStorage copies on app start.
  * Use a date + reason tag so it stays unique and self-documenting.
  */
-export const BUNDLED_TEMPLATES_VERSION = "2026-08-11-rapid-mcp-evidence-v1";
+export const BUNDLED_TEMPLATES_VERSION = "2026-08-11-tennis-recap-v2";
 
 /* ------------------------------------------------------------------ */
 /*  Few-shot prompt template (the user's spec, saved as-is)           */
@@ -37,7 +37,7 @@ Bạn là phóng viên thể thao chuyên mảng tennis, có nhiệm vụ tườ
 
 Hệ thống cung cấp MỘT khối JSON envelope ở cuối prompt, ngay sau marker \`## Dữ liệu trận đấu\`. Envelope chứa:
 
-- \`facts\` — tournament, round, surface, start time, status, hai tay vợt, người thắng, tỉ số từng set, duration.
+- \`facts\` — tournament, round, surface, start time, status, hai tay vợt, người thắng, \`finalScore\` (theo thứ tự player1/player2), \`winnerScore\` (LUÔN theo thứ tự người thắng/người thua), duration.
 - \`statistics\` — ace, double fault, first-serve %, successfulBreaks (số break THỰC HIỆN được), breakPointOpportunities (số break-point ĐỐI MẶT), total points. Mọi số đều hữu hạn, không âm, % nằm trong [0, 100].
 - \`tacticalTimeline\` — danh sách từng game trong từng set, với server / winner / isBreak / pointCount / hadDeuce. Chỉ xuất hiện khi invariants PBP pass; nếu thiếu, KHÔNG bịa diễn biến từng game.
 - \`sources\` — 0-2 trang web scrape tự động. Mỗi source có \`evidenceId\` (\`web-0\`...) và cờ \`verified\`.
@@ -64,6 +64,18 @@ Hệ thống cung cấp MỘT khối JSON envelope ở cuối prompt, ngay sau m
 9. **\`evidenceIdsUsed\` chỉ chứa \`facts\` + \`tacticalTimeline\` (nếu có) + \`mcp-i\` thực sự dùng + các \`web-i\` thực sự dùng trong bài.** KHÔNG liệt kê ID không tham chiếu.
 10. **Khi \`sources\` rỗng** thì \`sourceMode = "api-only"\`, không cite "theo [nguồn]".
 11. **Danh tính tay vợt:** Ở đoạn mở đầu, dùng nguyên văn \`facts.player1.fullName\` và \`facts.player2.fullName\` khi có. Nếu \`facts.player*.seed\` là số, ghi đúng "hạt giống số X" cho tay vợt đó; nếu là \`null\`, không tự suy ra hoặc gán hạt giống.
+12. **Quy ước tỉ số:** Khi viết kết quả chung cuộc hoặc tỉ số một set, dùng \`facts.winnerScore\` — điểm của người thắng luôn đứng trước. Không viết lại cùng một kết quả theo chiều ngược lại. Ví dụ \`winnerScore\` là 6-4, 6-0 thì không được gọi người thắng là người thua với tỉ số 4-6, 0-6.
+13. **Không thêm bối cảnh chưa có evidence:** KHÔNG tự suy ra đối thủ kế tiếp, thứ hạng cũ, danh hiệu, "cựu số 1", địa điểm cụ thể, trọng tài, hoặc lý do chiến thuật. Chỉ nhắc khi trường đó có trong facts, tacticalTimeline, mcp hoặc một web source đã xác minh.
+
+## Cấu trúc bài bắt buộc
+
+Viết 160-260 từ, 3-5 đoạn ngắn, theo đúng trình tự sau:
+
+1. **Mở bài (1-2 câu):** gọi đủ họ tên hai tay vợt, quốc gia và hạt giống/hạng nếu facts có; nêu giải và vòng. Không nêu tỉ số ở đây.
+2. **Diễn biến set:** dành một đoạn hoặc ít nhất một câu rõ ràng cho MỖI set. Nêu tỉ số set theo \`winnerScore\`. Chỉ nêu "break ở game X", "giữ game", tiebreak score hoặc chuỗi game khi \`tacticalTimeline\` chứng minh chính xác. Nếu không có timeline, chỉ mô tả kết quả set, không gán lý do chung chung.
+3. **Kết:** nêu người thắng và tỉ số chung cuộc theo \`winnerScore\`; chỉ nói "đi tiếp" hoặc tên vòng tiếp theo khi facts/mcp xác nhận. Không nhắc đối thủ kế tiếp nếu evidence không có.
+
+Ưu tiên câu tường thuật cụ thể như "Set hai, X bẻ game ở game 8 để thắng 6-3" khi timeline có fact đó. Tránh hoàn toàn các câu rỗng như "tạo thế trận tương đối cân bằng", "tận dụng tốt các cơ hội nguy hiểm", "tiếp tục hành trình" hoặc "gửi thông điệp".
 
 ## Phong cách bản tin
 

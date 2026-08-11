@@ -61,6 +61,8 @@ export interface TennisMatchEvidence {
     player2: { name: string; fullName: string; country: string; ranking: number | null; seed: number | null };
     winnerSide: 1 | 2 | null;
     finalScore: { player1: number; player2: number }[] | null;
+    /** The same set scores with the winner's games first, for report prose. */
+    winnerScore: { winner: number; loser: number }[] | null;
     matchDurationMinutes: number | null;
   };
   /** Sanitized statistics. Every value is finite, non-negative, and
@@ -436,6 +438,11 @@ export function buildTennisEvidence(
     tournamentCategory: match.tournamentCategory,
     winnerSide,
     finalScore,
+    winnerScore: finalScore && winnerSide
+      ? finalScore.map((set) => winnerSide === 1
+        ? { winner: set.player1, loser: set.player2 }
+        : { winner: set.player2, loser: set.player1 })
+      : null,
     matchDurationMinutes: isFiniteNumber(match.stats?.matchDurationMinutes)
       ? match.stats.matchDurationMinutes
       : null,

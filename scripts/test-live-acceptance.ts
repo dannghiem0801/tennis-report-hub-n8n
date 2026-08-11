@@ -46,6 +46,7 @@ const tennisEvidence: TennisMatchEvidence = {
     player2: { name: "B. van de Zandschulp", fullName: "Botic van de Zandschulp", country: "NED", ranking: 64, seed: null },
     winnerSide: 1,
     finalScore: [{ player1: 6, player2: 4 }, { player1: 7, player2: 5 }],
+    winnerScore: [{ winner: 6, loser: 4 }, { winner: 7, loser: 5 }],
     matchDurationMinutes: 95,
   },
   statistics: {

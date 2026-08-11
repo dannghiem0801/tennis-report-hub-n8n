@@ -385,6 +385,17 @@ export function validateEnvelope(
           blocking: true,
         });
       }
+      if (te.facts.winnerSide !== null) {
+        const winnerFirst = te.facts.winnerSide === 1 ? forward : reverse;
+        const loserFirst = te.facts.winnerSide === 1 ? reverse : forward;
+        if (article.includes(loserFirst) && loserFirst !== winnerFirst) {
+          issues.push({
+            code: "winner_mismatch",
+            message: `Bài viết dùng tỉ số chung cuộc theo chiều người thua: ${loserFirst}; phải là ${winnerFirst}`,
+            blocking: true,
+          });
+        }
+      }
     }
     if (te.facts.winnerSide !== null) {
       const winnerName =
