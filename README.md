@@ -40,7 +40,7 @@ cp .env.example .env.local
 | --- | --- | --- |
 | `RAPID_API_KEY` | Tennis data (RapidAPI flashscore4), server-side only | `""` |
 | `RAPID_API_HOST` | RapidAPI host, server-side only | `flashscore4.p.rapidapi.com` |
-| `VITE_LLM_ENABLED` | Bật/tắt auto report generation | `false` |
+| `VITE_LLM_ENABLED` | Bật/tắt auto report generation | `false` local; `true` by default on a deployed Vercel site using `LLM_API_KEY` |
 | `VITE_LLM_PROVIDER` | `anthropic` hoặc `openai-compatible` | `anthropic` |
 | `VITE_LLM_BASE_URL` | Base URL của LLM proxy / API | `https://api.minimax.io/anthropic` |
 | `VITE_LLM_API_KEY` | Key cho gọi LLM trực tiếp ở local/dev; không dùng trên Vercel production | `""` |

@@ -1,7 +1,12 @@
 // Regression test for the production LLM proxy boundary.
 // Run with: npx tsx scripts/test-llm-proxy.ts
 
-import { callLLM, isLLMConfigured } from "../src/api/llm";
+import {
+  callLLM,
+  getDefaultLLMConfig,
+  isLLMConfigured,
+  migrateLLMConfig,
+} from "../src/api/llm";
 import type { LLMConfig } from "../src/types";
 
 function assert(condition: unknown, message: string): asserts condition {
@@ -42,6 +47,17 @@ async function main(): Promise<void> {
     enableThinking: true,
     enableWebSearch: false,
   };
+
+  const productionDefault = getDefaultLLMConfig({ useServerProxy: true });
+  assert(
+    isLLMConfigured(productionDefault),
+    "a deployed browser must use the configured server proxy without exposing an API key"
+  );
+  assert(productionDefault.apiKey === "", "the production default must not expose an API key");
+  assert(
+    isLLMConfigured(migrateLLMConfig({ enabled: false, provider: "anthropic", apiKey: "", baseUrl: "", model: "" }, { useServerProxy: true })),
+    "the legacy empty browser setting must migrate to the server-proxy configuration"
+  );
 
   try {
     assert(isLLMConfigured(config), "production proxy config without a browser API key must be available to report generation");

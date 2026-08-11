@@ -74,7 +74,13 @@ export function MatchRow({ match, compact: _compact, onOpenReport, onOpenSchedul
         <Button
           size="icon-sm"
           variant="ghost"
-          onClick={() => toggleWatchlist(match)}
+          onClick={() => {
+            // Adding a completed match must use the explicit path so its
+            // details/PBP request starts immediately. `toggleWatchlist`
+            // remains the removal path for an already watched match.
+            if (watched) toggleWatchlist(match);
+            else addToWatchlist(match);
+          }}
           title={watched ? "Bỏ theo dõi" : "Theo dõi"}
           className={cn("h-6 w-6 p-0", watched ? "text-amber-400 hover:text-amber-300" : "text-slate-500 hover:text-slate-200")}
         >

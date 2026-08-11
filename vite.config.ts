@@ -21,6 +21,9 @@ export default defineConfig(({ mode }) => {
   const env = loadEnv(mode, __dirname, "");
   const llmProxyUrl = env.LLM_PROXY_URL || "https://api.minimax.io/anthropic";
   const rapidApiHost = env.RAPID_API_HOST || "flashscore4.p.rapidapi.com";
+  // Keep local Vite behavior aligned with the Vercel proxy: one RapidAPI
+  // application key can serve both the REST adapter and MCP enrichment.
+  const rapidApiKey = env.RAPID_API_KEY || env.RAPID_MCP_API_KEY;
 
   return {
     // `envWriterPlugin` exposes `POST /__save-env` so the Settings
@@ -52,7 +55,7 @@ export default defineConfig(({ mode }) => {
           changeOrigin: true,
           secure: true,
           headers: {
-            ...(env.RAPID_API_KEY ? { "X-Rapidapi-Key": env.RAPID_API_KEY } : {}),
+            ...(rapidApiKey ? { "X-Rapidapi-Key": rapidApiKey } : {}),
             "X-Rapidapi-Host": rapidApiHost,
           },
         },

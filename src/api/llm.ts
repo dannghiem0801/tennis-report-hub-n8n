@@ -86,42 +86,41 @@ const OPENAI_COMPATIBLE_DEFAULT_BASE_URL = "https://api.openai.com/v1";
 
 // ---- Public LLM config defaults + migration ----
 
+const DEFAULT_ANTHROPIC_BASE_URL = "https://api.minimax.io/anthropic";
+const DEFAULT_ANTHROPIC_MODEL = "MiniMax-M3";
+
+function isDeployedBrowser(): boolean {
+  if (import.meta.env?.DEV === true || typeof window === "undefined") return false;
+  const hostname = window.location.hostname.toLowerCase();
+  return hostname !== "localhost" && hostname !== "127.0.0.1" && hostname !== "::1";
+}
+
 /**
- * Default LLM config used when no localStorage entry exists or the
- * entry is missing required fields. The provider is "anthropic" by
- * default (Anthropic Messages API format), but `baseUrl`, `apiKey`,
- * and `model` are EMPTY so the user must configure their own
- * Anthropic-compatible proxy + model. The app never assumes a
- * specific LLM provider.
- *
- * Both `enableThinking` and `enableWebSearch` default to true:
- * - `enableThinking`: MiniMax-M3 is a reasoning model per the spec —
- *   enabling `thinking: {type: "adaptive"}` lets it reason internally
- *   and produce a clean text report instead of leaking fake
- *   `<tool_call>` blocks into the output.
- * - `enableWebSearch`: declares a custom `web_search` tool so the
- *   model can verify scores / look up context. Client-side execution
- *   currently returns a clear "not configured" stub; the model
- *   handles this gracefully per the prompt.
- *
- * **Env-layer (see `src/lib/env.ts`)**: every field below also reads
- * from `import.meta.env` via the `env` helper. When the corresponding
- * `VITE_LLM_*` variable is set in `.env.local`, it overrides the
- * hardcoded default here. This is the canonical way to ship
- * pre-configured keys to a fresh install without touching the UI.
+ * Build the initial LLM configuration. A deployed browser defaults to the
+ * same-origin Vercel proxy, which owns the server-only `LLM_API_KEY`; local
+ * development remains opt-in so a developer does not accidentally call a
+ * paid model without configuring `.env.local`.
  */
-export const DEFAULT_LLM: LLMConfig = {
-  enabled: env.llm.enabled() ?? false,
-  provider: env.llm.provider() ?? "anthropic",
-  apiKey: env.llm.apiKey() ?? "",
-  baseUrl: env.llm.baseUrl() ?? "",
-  model: env.llm.model() ?? "",
-  maxTokens: env.llm.maxTokens() ?? ANTHROPIC_DEFAULT_MAX_TOKENS,
-  enableThinking: env.llm.enableThinking() ?? true,
-  enableWebSearch: env.llm.enableWebSearch() ?? true,
-  searchProvider: env.search.provider() ?? "firecrawl",
-  searchApiKey: env.search.apiKey() ?? "",
-};
+export function getDefaultLLMConfig(
+  options: { useServerProxy?: boolean } = {}
+): LLMConfig {
+  const useServerProxy = options.useServerProxy ?? isDeployedBrowser();
+  return {
+    enabled: env.llm.enabled() ?? useServerProxy,
+    provider: env.llm.provider() ?? "anthropic",
+    apiKey: env.llm.apiKey() ?? "",
+    baseUrl: env.llm.baseUrl() ?? (useServerProxy ? DEFAULT_ANTHROPIC_BASE_URL : ""),
+    model: env.llm.model() ?? (useServerProxy ? DEFAULT_ANTHROPIC_MODEL : ""),
+    maxTokens: env.llm.maxTokens() ?? ANTHROPIC_DEFAULT_MAX_TOKENS,
+    enableThinking: env.llm.enableThinking() ?? true,
+    enableWebSearch: env.llm.enableWebSearch() ?? true,
+    searchProvider: env.search.provider() ?? "firecrawl",
+    searchApiKey: env.search.apiKey() ?? "",
+  };
+}
+
+/** Default LLM config for the current browser environment. */
+export const DEFAULT_LLM: LLMConfig = getDefaultLLMConfig();
 
 /**
  * Reconcile a saved LLM config (possibly from an older schema) into
@@ -136,13 +135,28 @@ export const DEFAULT_LLM: LLMConfig = {
  * Env always wins on startup. If you want a Settings UI change to
  * stick across reloads, leave the corresponding `VITE_LLM_*` blank.
  */
-export function migrateLLMConfig(saved: Partial<LLMConfig> | undefined): LLMConfig {
-  if (!saved) return { ...DEFAULT_LLM };
+export function migrateLLMConfig(
+  saved: Partial<LLMConfig> | undefined,
+  options: { useServerProxy?: boolean } = {}
+): LLMConfig {
+  const defaults = options.useServerProxy === undefined
+    ? DEFAULT_LLM
+    : getDefaultLLMConfig(options);
+  // Earlier releases persisted this entirely-empty client-side default.
+  // It did not represent a deliberate provider choice, but it prevents a
+  // browser from ever reaching the now-configured server proxy.
+  const isLegacyUnconfiguredDefault = Boolean(saved) &&
+    saved?.enabled === false &&
+    !saved.apiKey &&
+    !saved.baseUrl &&
+    !saved.model &&
+    (!saved.provider || saved.provider === "anthropic");
+  if (!saved || isLegacyUnconfiguredDefault) return { ...defaults };
   return {
-    ...DEFAULT_LLM,
+    ...defaults,
     ...saved,
     // Backfill provider for legacy entries
-    provider: saved.provider ?? DEFAULT_LLM.provider,
+    provider: saved.provider ?? defaults.provider,
     // Re-apply env on top of saved so env vars win. Only overlay a
     // field when env actually has a value (parseBool / parseNumber
     // return undefined for blank, so blank env vars don't clobber a
