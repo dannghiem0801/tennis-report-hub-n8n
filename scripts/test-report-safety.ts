@@ -24,6 +24,7 @@ import {
 } from "../src/reports/evidence";
 import { applyMcpTennisMatchDetails, selectMcpRequests } from "../src/reports/mcp-enrichment";
 import { DEFAULT_TEMPLATES } from "../src/reports/templates";
+import { getReportLlmConfig } from "../src/reports/generate";
 import {
   FIRECRAWL_MAX_SOURCES,
   fetchMatchSources,
@@ -836,6 +837,21 @@ test("Tennis prompt requires full names and explicit seeds when available", () =
   assert(tennisPrompt.includes("hạt giống số X"), "prompt requires an explicit seed when supplied");
   assert(tennisPrompt.includes("winnerScore"), "prompt requires winner-first set scores");
   assert(tennisPrompt.includes("KHÔNG tự suy ra đối thủ kế tiếp"), "prompt blocks invented next opponents");
+});
+
+test("Structured reports disable adaptive thinking and bound output", () => {
+  const config = getReportLlmConfig({
+    enabled: true,
+    provider: "anthropic",
+    apiKey: "",
+    baseUrl: "https://api.minimax.io/anthropic",
+    model: "MiniMax-M3",
+    maxTokens: 200_000,
+    enableThinking: true,
+    enableWebSearch: true,
+  });
+  assertEq(config.enableThinking, false, "reports must reserve output tokens for the article");
+  assertEq(config.maxTokens, 8_192, "reports cap output to the article-sized budget");
 });
 
 test("MCP enrichment: enriches every completed football match within the cap", () => {

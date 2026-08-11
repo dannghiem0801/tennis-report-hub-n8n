@@ -7,6 +7,7 @@ import {
   isLLMConfigured,
   migrateLLMConfig,
 } from "../src/api/llm";
+import { getReportLlmConfig } from "../src/reports/generate";
 import type { LLMConfig } from "../src/types";
 
 function assert(condition: unknown, message: string): asserts condition {
@@ -45,7 +46,7 @@ async function main(): Promise<void> {
     baseUrl: "https://api.minimax.io/anthropic",
     apiKey: "",
     model: "MiniMax-M3",
-    maxTokens: 500,
+    maxTokens: 200_000,
     enableThinking: true,
     enableWebSearch: true,
   };
@@ -63,10 +64,16 @@ async function main(): Promise<void> {
 
   try {
     assert(isLLMConfigured(config), "production proxy config without a browser API key must be available to report generation");
-    const result = await callLLM({ prompt: "Viết một bản tin kiểm thử.", config, disableTools: true });
+    const result = await callLLM({
+      prompt: "Viết một bản tin kiểm thử.",
+      config: getReportLlmConfig(config),
+      disableTools: true,
+    });
     assert(requestedUrl === "/api/llm/v1/messages", `expected production proxy URL, got ${requestedUrl}`);
     assert(requestedHeaders?.get("x-api-key") === null, "browser must not send an LLM API key to the server proxy");
     assert(!requestedBody.includes("\"tools\""), "report calls with disableTools must not send tool definitions upstream");
+    assert(!requestedBody.includes("\"thinking\""), "structured reports must not spend their output budget on adaptive thinking");
+    assert(requestedBody.includes("\"max_tokens\":8192"), "structured reports use the bounded output budget");
     assert(result.finishReason === "end_turn", `expected end_turn, got ${result.finishReason}`);
     console.log("✅ production proxy accepts an Anthropic config without a browser API key");
   } finally {

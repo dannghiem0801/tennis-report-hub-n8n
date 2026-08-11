@@ -1,6 +1,7 @@
 import type {
   FootballMatch,
   Match,
+  LLMConfig,
   Report,
   ReportQuality,
   ReportTemplate,
@@ -24,7 +25,7 @@ import {
 /** Per-call report budget. A published article is 200-400 words, so a
  *  bounded budget prevents a reasoning model from consuming minutes of
  *  upstream time on an unusably long draft or hidden reasoning trace. */
-const LLM_MAX_TOKENS = 16_384;
+const LLM_MAX_TOKENS = 8_192;
 /** Validator + prompt bundle version. Bump whenever the
  *  validator/prompt schema changes in an incompatible way. */
 export const VALIDATOR_VERSION = "publication-safe-v1";
@@ -635,6 +636,20 @@ export interface ApplyTemplateResult {
   enrichedMatch?: Match;
 }
 
+/**
+ * Report writing is a bounded transformation of a validated evidence
+ * envelope. MiniMax adaptive thinking can consume the entire output budget
+ * before emitting an article, so keep it for interactive use only and reserve
+ * this path's tokens for the JSON envelope and prose.
+ */
+export function getReportLlmConfig(config: LLMConfig): LLMConfig {
+  return {
+    ...config,
+    maxTokens: Math.min(config.maxTokens ?? LLM_MAX_TOKENS, LLM_MAX_TOKENS),
+    enableThinking: false,
+  };
+}
+
 export async function applyTemplate(
   template: ReportTemplate,
   match: Match,
@@ -716,10 +731,7 @@ export async function applyTemplate(
 
   // Cap max_tokens per request; the safety budget is small so the
   // validator can reliably re-parse the result.
-  const configWithCap: Settings["llm"] = {
-    ...llmConfig,
-    maxTokens: Math.min(llmConfig.maxTokens ?? LLM_MAX_TOKENS, LLM_MAX_TOKENS),
-  };
+  const configWithCap = getReportLlmConfig(llmConfig);
 
   // 4. First call.
   const draftStart = Date.now();
