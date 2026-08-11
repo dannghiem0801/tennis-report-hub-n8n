@@ -25,7 +25,7 @@ npm run build                # production build
 
 ## 🔐 Biến môi trường (`.env.local`)
 
-Đặt `RAPID_API_KEY` trong `.env.local` khi chạy local hoặc trong Vercel Environment Variables khi deploy. Key này chỉ được đọc ở máy chủ/proxy, không được đưa vào bundle hay localStorage.
+Đặt `RAPID_API_KEY` trong `.env.local` khi chạy local hoặc trong Vercel Environment Variables khi deploy. Key này chỉ được đọc ở máy chủ/proxy, không được đưa vào bundle hay localStorage. Nếu đã đặt `RAPID_MCP_API_KEY` cho cùng RapidAPI Application, REST proxy có thể dùng nó làm fallback.
 
 ```bash
 cp .env.example .env.local

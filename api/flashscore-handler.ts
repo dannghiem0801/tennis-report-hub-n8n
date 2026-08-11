@@ -19,7 +19,9 @@
  *   function file.
  *
  * Env vars (server-side only):
- *   - `RAPID_API_KEY`   — required. The X-Rapidapi-Key value.
+ *   - `RAPID_API_KEY`   — preferred X-Rapidapi-Key value.
+ *   - `RAPID_MCP_API_KEY` — fallback when one RapidAPI application key is
+ *     configured for both the REST proxy and MCP enrichment.
  *   - `RAPID_API_HOST`  — optional. Default `flashscore4.p.rapidapi.com`.
  */
 
@@ -49,9 +51,9 @@ export default async function handler(
     return;
   }
 
-  const apiKey = process.env.RAPID_API_KEY;
+  const apiKey = process.env.RAPID_API_KEY ?? process.env.RAPID_MCP_API_KEY;
   if (!apiKey) {
-    res.status(500).json({ error: "Server misconfigured: RAPID_API_KEY not set" });
+    res.status(500).json({ error: "Server misconfigured: RAPID_API_KEY or RAPID_MCP_API_KEY not set" });
     return;
   }
 
