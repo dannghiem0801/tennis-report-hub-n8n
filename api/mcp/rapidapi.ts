@@ -73,13 +73,14 @@ function parseExtraHeaders(raw: string | undefined): Record<string, string> {
     // RapidAPI's MCP setup may need a routing header. Do not let env config
     // override protocol headers or inject arbitrary network-control headers.
     if (
-      !/^x-rapidapi-[a-z0-9-]+$/.test(normalizedName) ||
+      (normalizedName !== "x-api-host" && !/^x-rapidapi-[a-z0-9-]+$/.test(normalizedName)) ||
+      normalizedName === "x-api-key" ||
       normalizedName === "x-rapidapi-key" ||
       typeof value !== "string" ||
       !value.trim()
     ) {
       throw new RapidMcpError(
-        "RAPID_MCP_REQUEST_HEADERS chỉ nhận header x-rapidapi-* không rỗng (trừ x-rapidapi-key).",
+        "RAPID_MCP_REQUEST_HEADERS chỉ nhận x-api-host hoặc x-rapidapi-* không rỗng (trừ header key).",
         500
       );
     }
@@ -102,9 +103,6 @@ export function getRapidMcpConfig(env: NodeJS.ProcessEnv = process.env): RapidMc
     .split(",")
     .map((tool) => tool.trim())
     .filter(Boolean);
-  if (allowedTools.length === 0) {
-    throw new RapidMcpError("RAPID_MCP_ALLOWED_TOOLS chưa được cấu hình.", 500);
-  }
 
   const url = (env.RAPID_MCP_URL ?? DEFAULT_URL).trim().replace(/\/+$/, "");
   try {
@@ -162,7 +160,7 @@ export class RapidMcpClient {
         headers: {
           Accept: "application/json, text/event-stream",
           "Content-Type": "application/json",
-          "X-RapidAPI-Key": this.config.apiKey,
+          "x-api-key": this.config.apiKey,
           ...this.config.extraHeaders,
         },
         body: JSON.stringify({ jsonrpc: "2.0", id, method, ...(params ? { params } : {}) }),
@@ -202,7 +200,7 @@ export class RapidMcpClient {
         headers: {
           Accept: "application/json, text/event-stream",
           "Content-Type": "application/json",
-          "X-RapidAPI-Key": this.config.apiKey,
+          "x-api-key": this.config.apiKey,
           ...this.config.extraHeaders,
         },
         body: JSON.stringify({ jsonrpc: "2.0", method }),
@@ -239,6 +237,9 @@ export class RapidMcpClient {
   }
 
   async callTool(name: string, argumentsValue: Record<string, unknown>): Promise<McpToolResult> {
+    if (this.config.allowedTools.length === 0) {
+      throw new RapidMcpError("RAPID_MCP_ALLOWED_TOOLS chưa được cấu hình.", 503);
+    }
     if (!this.config.allowedTools.includes(name)) {
       throw new RapidMcpError(`Tool MCP không được phép: ${name}`, 403);
     }

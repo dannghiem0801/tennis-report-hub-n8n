@@ -47,11 +47,11 @@ await test("requires feature flag", () => {
 
 await test("parses only allowlisted Rapid routing headers", () => {
   const config = getRapidMcpConfig(env({
-    RAPID_MCP_REQUEST_HEADERS: '{"x-rapidapi-host":"flashscore4.p.rapidapi.com"}',
+    RAPID_MCP_REQUEST_HEADERS: '{"x-api-host":"flashscore4.p.rapidapi.com"}',
     RAPID_MCP_MAX_CALLS: "99",
   }));
   assert(config.maxCallsPerRequest === 4, "max calls should be capped");
-  assert(config.extraHeaders["x-rapidapi-host"] === "flashscore4.p.rapidapi.com", "routing header missing");
+  assert(config.extraHeaders["x-api-host"] === "flashscore4.p.rapidapi.com", "routing header missing");
 });
 
 await test("rejects protocol-header override", () => {
@@ -69,6 +69,8 @@ await test("executes initialize, tools/list, and only allowlisted tools", async 
   globalThis.fetch = (async (_input, init) => {
     const body = JSON.parse(String(init?.body)) as { method: string; id?: number };
     methods.push(body.method);
+    const headers = new Headers(init?.headers);
+    assert(headers.get("x-api-key") === "test-key", "MCP API key header missing");
     const result = body.method === "tools/list"
       ? { tools: [{ name: "match_details" }] }
       : body.method === "tools/call"
