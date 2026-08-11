@@ -22,7 +22,12 @@ import {
   buildTennisEvidence,
   type MatchEvidence,
 } from "../src/reports/evidence";
-import { applyMcpTennisMatchDetails, selectMcpRequests } from "../src/reports/mcp-enrichment";
+import {
+  applyMcpTennisMatchDetails,
+  applyMcpTennisPointByPoint,
+  compactMcpEvidenceForReport,
+  selectMcpRequests,
+} from "../src/reports/mcp-enrichment";
 import { DEFAULT_TEMPLATES } from "../src/reports/templates";
 import { getReportLlmConfig } from "../src/reports/generate";
 import {
@@ -125,6 +130,40 @@ function baseTennisMatch(): TennisMatch {
   };
 }
 
+function tennisMatchWithValidatedTimeline(): TennisMatch {
+  const match = baseTennisMatch();
+  const buildSet = (setNumber: number, winners: Array<1 | 2>, firstServer: 1 | 2) => {
+    let player1Games = 0;
+    let player2Games = 0;
+    return {
+      setNumber,
+      name: `Set ${setNumber}`,
+      games: winners.map((winner, index) => {
+        if (winner === 1) player1Games += 1;
+        else player2Games += 1;
+        const server: 1 | 2 = (index + (firstServer === 1 ? 0 : 1)) % 2 === 0 ? 1 : 2;
+        return {
+          homeGames: player1Games,
+          awayGames: player2Games,
+          gameWinner: winner,
+          isBreak: server === winner ? null : winner,
+          server,
+          pointSequence: "15,30,40,game",
+        };
+      }),
+    };
+  };
+  match.pointByPoint = {
+    sets: [
+      // At 5-4, Mensik breaks in game 10 to take the opening set 6-4.
+      buildSet(1, [1, 2, 1, 2, 1, 2, 1, 1, 2, 1], 1),
+      // After 5-5, Mensik breaks in game 11 and holds for 7-5.
+      buildSet(2, [2, 1, 2, 1, 2, 1, 2, 1, 2, 1, 1, 1], 2),
+    ],
+  };
+  return match;
+}
+
 function baseFootballMatch(): FootballMatch {
   return {
     id: "F1",
@@ -218,6 +257,44 @@ test("tennis: valid API-only article is accepted", () => {
   assert(env !== null, "env null");
   const r = validateEnvelope(env!, ev);
   assert(r.ok, `expected ok, got issues: ${r.issues.map((i) => i.code).join(",")}`);
+});
+
+test("tennis: validated PBP creates one mandatory narrative beat per set", () => {
+  const evidence = buildTennisEvidence(tennisMatchWithValidatedTimeline(), []);
+  assertEq(evidence.narrativePlan?.sets.length, 2, "one plan entry for each set");
+  assertEq(evidence.narrativePlan?.sets[0]?.requiredBeat.type, "break", "set one needs a break beat");
+  assertEq(
+    evidence.narrativePlan?.sets[0]?.requiredBeat.type === "break"
+      ? evidence.narrativePlan.sets[0].requiredBeat.gameNumber
+      : undefined,
+    10,
+    "last break of set one is game 10"
+  );
+});
+
+test("tennis: generic scorecard is rejected when verified PBP exists", () => {
+  const evidence = buildTennisEvidence(tennisMatchWithValidatedTimeline(), []);
+  const envelope = parseEnvelope(JSON.stringify({
+    articleMarkdown: "Jakub Mensik đánh bại Botic van de Zandschulp 6-4, 7-5 tại ATP Montreal. Set đầu kéo dài với nhiều pha giằng co trước khi Mensik thắng 6-4. Sang set hai, Mensik tiếp tục duy trì ưu thế để khép lại trận đấu 7-5 sau 95 phút.",
+    sourceMode: "api-only",
+    evidenceIdsUsed: ["facts", "tacticalTimeline"],
+  }));
+  const result = validateEnvelope(envelope!, evidence);
+  assert(
+    result.issues.some((issue) => issue.code === "tactical_omitted" && issue.blocking),
+    "generic prose must not pass when the timeline contains required beats"
+  );
+});
+
+test("tennis: set-by-set recap using required PBP beats is accepted", () => {
+  const evidence = buildTennisEvidence(tennisMatchWithValidatedTimeline(), []);
+  const envelope = parseEnvelope(JSON.stringify({
+    articleMarkdown: "Jakub Mensik gặp Botic van de Zandschulp tại vòng R32 ATP Montreal. Ở set một, Mensik bẻ game ở game thứ 10 để khép lại set 6-4. Sang set hai, anh bẻ giao bóng ở game 11, tạo cách biệt trước khi bảo toàn game cuối để thắng 7-5. Mensik thắng chung cuộc 6-4, 7-5 sau 95 phút.",
+    sourceMode: "api-only",
+    evidenceIdsUsed: ["facts", "tacticalTimeline"],
+  }));
+  const result = validateEnvelope(envelope!, evidence);
+  assert(result.ok, `expected tactical recap to pass, got ${result.issues.map((issue) => issue.code).join(",")}`);
 });
 
 test("tennis: rejects a winner claim paired with the losing-perspective full score", () => {
@@ -831,11 +908,59 @@ test("MCP enrichment: promotes explicit tennis names and seeds from match detail
   assertEq(enriched.player2.seed, 31, "away seed comes from MCP details");
 });
 
+test("MCP enrichment: combines explicit given and family names from match details", () => {
+  const match = baseTennisMatch();
+  match.player1.fullName = "Tien L.";
+  const enriched = applyMcpTennisMatchDetails(match, [{
+    evidenceId: "mcp-0",
+    toolName: "Get_Match_Details",
+    fetchedAt: "2026-08-11T00:00:00.000Z",
+    content: JSON.stringify({
+      home_team: { name: "Tien L.", first_name: "Learner", last_name: "Tien" },
+    }),
+  }]);
+  if (enriched.sport !== "tennis") throw new Error("expected tennis match");
+  assertEq(enriched.player1.fullName, "Learner Tien", "explicit name fields replace initials");
+});
+
+test("MCP enrichment: promotes point-by-point into the canonical timeline", () => {
+  const match = baseTennisMatch();
+  const enriched = applyMcpTennisPointByPoint(match, [{
+    evidenceId: "mcp-1",
+    toolName: "Get_Match_Point_by_Point",
+    fetchedAt: "2026-08-11T00:00:00.000Z",
+    content: JSON.stringify({
+      data: [{
+        set_number: 1,
+        games: [
+          { home_games: 1, away_games: 0, game_winner: 1, server: 1, is_break: null, point_sequence: "15,30,40,game" },
+          { home_games: 1, away_games: 1, game_winner: 2, server: 2, is_break: null, point_sequence: "15,30,40,game" },
+        ],
+      }],
+    }),
+  }]);
+  if (enriched.sport !== "tennis") throw new Error("expected tennis match");
+  assertEq(enriched.pointByPoint?.sets[0]?.games.length, 2, "MCP PBP becomes canonical game data");
+});
+
+test("MCP enrichment: compacts normalized PBP before it reaches the writer", () => {
+  const match = baseTennisMatch();
+  match.pointByPoint = { sets: [{ setNumber: 1, name: "Set 1", games: [] }] };
+  const evidence = compactMcpEvidenceForReport(match, [{
+    evidenceId: "mcp-1",
+    toolName: "Get_Match_Point_by_Point",
+    fetchedAt: "2026-08-11T00:00:00.000Z",
+    content: "{\"large\":\"raw point-by-point payload\"}",
+  }]);
+  assert(evidence[0]!.content.includes("tacticalTimeline"), "raw PBP is replaced by canonical provenance");
+});
+
 test("Tennis prompt requires full names and explicit seeds when available", () => {
   const tennisPrompt = DEFAULT_TEMPLATES.find((template) => template.id === "tpl-prompt")?.content ?? "";
   assert(tennisPrompt.includes("facts.player1.fullName"), "prompt requires full player names");
   assert(tennisPrompt.includes("hạt giống số X"), "prompt requires an explicit seed when supplied");
   assert(tennisPrompt.includes("winnerScore"), "prompt requires winner-first set scores");
+  assert(tennisPrompt.includes("narrativePlan"), "prompt requires verified turning points from the timeline");
   assert(tennisPrompt.includes("KHÔNG tự suy ra đối thủ kế tiếp"), "prompt blocks invented next opponents");
 });
 

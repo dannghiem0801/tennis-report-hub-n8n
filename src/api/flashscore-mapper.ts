@@ -728,11 +728,23 @@ function extractTennisPlayerIdentity(
   if (name && !isLikelyAbbreviatedPlayerName(name) && name.length <= 120) {
     identity.fullName = name;
   } else {
+    const givenName = extractField<unknown>(source, [
+      "first_name", "firstName", "given_name", "givenName", "forename",
+    ]);
+    const familyName = extractField<unknown>(source, [
+      "last_name", "lastName", "family_name", "familyName", "surname",
+    ]);
+    if (
+      typeof givenName === "string" && givenName.trim() &&
+      typeof familyName === "string" && familyName.trim()
+    ) {
+      identity.fullName = `${givenName.trim()} ${familyName.trim()}`;
+    }
     const topLevelName = extractField<unknown>(obj, [
       `${prefix}_full_name`, `${prefix}FullName`, `${prefix}_player_name`, `${prefix}PlayerName`,
       `player${sideNumber}_full_name`, `player${sideNumber}FullName`,
     ]);
-    if (typeof topLevelName === "string") {
+    if (!identity.fullName && typeof topLevelName === "string") {
       const candidate = topLevelName.trim();
       if (candidate && !isLikelyAbbreviatedPlayerName(candidate) && candidate.length <= 120) identity.fullName = candidate;
     }

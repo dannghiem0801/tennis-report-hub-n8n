@@ -42,6 +42,7 @@ export type IssueCode =
   | "process_text"
   | "false_source_claim"
   | "tactical_invention"
+  | "tactical_omitted"
   | "truncation"
   | "word_count_short"
   | "word_count_long"
@@ -308,6 +309,44 @@ function detectTacticalInvention(
   return [];
 }
 
+/** A validated timeline is only valuable if the published recap actually
+ * names the concrete turning points. Require the deterministic beat selected
+ * for each set, rather than accepting a generic list of set scores. */
+function detectTacticalOmission(
+  article: string,
+  evidence: MatchEvidence
+): ValidationIssue[] {
+  if (evidence.sport !== "tennis") return [];
+  const plan = (evidence as TennisMatchEvidence).narrativePlan;
+  if (!plan || plan.sets.length === 0) return [];
+
+  const hasGameReference = (gameNumber: number): boolean => {
+    const escaped = String(gameNumber).replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+    return new RegExp(`\\bgame\\s+(?:thứ\\s+)?${escaped}\\b`, "i").test(article);
+  };
+
+  for (const set of plan.sets) {
+    if (set.requiredBeat.type === "tiebreak") {
+      if (!/tiebreak/i.test(article)) {
+        return [{
+          code: "tactical_omitted",
+          message: `Bài viết bỏ qua loạt tiebreak bắt buộc của set ${set.setNumber}`,
+          blocking: true,
+        }];
+      }
+      continue;
+    }
+    if (!hasGameReference(set.requiredBeat.gameNumber)) {
+      return [{
+        code: "tactical_omitted",
+        message: `Bài viết bỏ qua game ${set.requiredBeat.gameNumber} là diễn biến bắt buộc của set ${set.setNumber}`,
+        blocking: true,
+      }];
+    }
+  }
+  return [];
+}
+
 /** Detect process / tool narration that leaked into the article. */
 function detectProcessText(article: string): ValidationIssue[] {
   const issues: ValidationIssue[] = [];
@@ -360,6 +399,7 @@ export function validateEnvelope(
 
   // Tactical invention (blocking).
   issues.push(...detectTacticalInvention(article, evidence));
+  issues.push(...detectTacticalOmission(article, evidence));
 
   // Final score must agree.
   if (evidence.sport === "tennis") {

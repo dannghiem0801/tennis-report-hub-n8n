@@ -15,6 +15,11 @@ import {
   RapidMcpError,
 } from "./rapidapi.js";
 
+// Point-by-point is the one report input that can legitimately exceed the
+// normal evidence snippet size. Keep enough of it to parse the JSON; the
+// browser normalizes it into a much smaller tactical timeline before LLM use.
+const POINT_BY_POINT_MAX_CHARS = 32_000;
+
 interface RequestedTool {
   name: string;
   arguments: Record<string, unknown>;
@@ -115,7 +120,10 @@ export default async function handler(req: VercelRequest, res: VercelResponse): 
         toolName,
         fetchedAt,
         verified: !result.isError,
-        content: compactToolResult(result),
+        content: compactToolResult(
+          result,
+          toolName === "Get_Match_Point_by_Point" ? POINT_BY_POINT_MAX_CHARS : undefined,
+        ),
       });
     }
 

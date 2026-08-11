@@ -71,6 +71,10 @@ export interface TennisMatchEvidence {
   statistics: TennisStatFacts | null;
   /** Game-by-game breakdown, present only when invariants pass. */
   tacticalTimeline: TennisTacticalTimeline | null;
+  /** One deterministic, game-level fact per set that the writer must cover
+   * when a validated tactical timeline is available. This prevents a generic
+   * scorecard from discarding the match's actual turning points. */
+  narrativePlan: TennisNarrativePlan | null;
   /** External sources we pre-fetched. */
   sources: ExternalSourceEvidence[];
   /** Missing match data fetched through the server-side RapidAPI MCP bridge. */
@@ -104,6 +108,30 @@ export interface TennisTacticalTimeline {
       finalScore: { player1: number; player2: number };
     }>;
     finalScore: { player1: number; player2: number };
+  }>;
+}
+
+export interface TennisNarrativePlan {
+  sets: Array<{
+    setNumber: number;
+    winner: 1 | 2;
+    finalScore: { player1: number; player2: number };
+    /** The last verified break in the set is a safe concrete turning point.
+     * A set without a break but ending 7-6 must be described as a tiebreak. */
+    requiredBeat:
+      | {
+          type: "break";
+          gameNumber: number;
+          byPlayer: 1 | 2;
+          scoreAfter: { player1: number; player2: number };
+        }
+      | { type: "tiebreak" }
+      | {
+          type: "set_finish";
+          gameNumber: number;
+          byPlayer: 1 | 2;
+          scoreAfter: { player1: number; player2: number };
+        };
   }>;
 }
 
@@ -343,6 +371,47 @@ function validateTennisPbp(pbp: PointByPointData): { ok: true; timeline: TennisT
   return { ok: true, timeline: { sets } };
 }
 
+function buildTennisNarrativePlan(timeline: TennisTacticalTimeline | null): TennisNarrativePlan | null {
+  if (!timeline || timeline.sets.length === 0) return null;
+
+  return {
+    sets: timeline.sets.map((set) => {
+      const winner: 1 | 2 = set.finalScore.player1 > set.finalScore.player2 ? 1 : 2;
+      const lastBreak = [...set.games].reverse().find((game) => game.isBreak);
+      let requiredBeat: TennisNarrativePlan["sets"][number]["requiredBeat"];
+
+      if (lastBreak) {
+        requiredBeat = {
+          type: "break",
+          gameNumber: lastBreak.gameNumber,
+          byPlayer: lastBreak.winner,
+          scoreAfter: lastBreak.finalScore,
+        };
+      } else if (
+        (set.finalScore.player1 === 7 && set.finalScore.player2 === 6) ||
+        (set.finalScore.player1 === 6 && set.finalScore.player2 === 7)
+      ) {
+        requiredBeat = { type: "tiebreak" };
+      } else {
+        const finalGame = set.games[set.games.length - 1]!;
+        requiredBeat = {
+          type: "set_finish",
+          gameNumber: finalGame.gameNumber,
+          byPlayer: finalGame.winner,
+          scoreAfter: finalGame.finalScore,
+        };
+      }
+
+      return {
+        setNumber: set.setNumber,
+        winner,
+        finalScore: set.finalScore,
+        requiredBeat,
+      };
+    }),
+  };
+}
+
 function buildTennisStatistics(stats: TennisMatchStats | undefined): TennisStatFacts | null {
   if (!stats) return null;
   const a = nonNegInt(stats.aces?.player1);
@@ -465,6 +534,7 @@ export function buildTennisEvidence(
       }
     }
   }
+  const narrativePlan = buildTennisNarrativePlan(tacticalTimeline);
 
   // ---- sources ----
   const externalSources: ExternalSourceEvidence[] = sources.map((s) => ({
@@ -484,6 +554,7 @@ export function buildTennisEvidence(
     facts,
     statistics,
     tacticalTimeline,
+    narrativePlan,
     sources: externalSources,
     mcp,
     limitations,

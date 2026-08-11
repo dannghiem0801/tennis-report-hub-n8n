@@ -8,7 +8,7 @@
  */
 
 import type { Match, TennisMatch } from "@/types";
-import { mapMatchDetails, type TennisPlayerIdentity } from "@/api/flashscore-mapper";
+import { mapMatchDetails, mapPointByPoint, type TennisPlayerIdentity } from "@/api/flashscore-mapper";
 import type { McpEvidence } from "./evidence";
 
 const ENRICHMENT_URL = "/api/mcp/enrich";
@@ -68,6 +68,37 @@ export function applyMcpTennisMatchDetails(match: Match, evidence: McpEvidence[]
     player1: applyIdentity(match.player1, details.player1),
     player2: applyIdentity(match.player2, details.player2),
   };
+}
+
+/** Promote a valid Get_Match_Point_by_Point response into the same canonical
+ * field used by the direct Flashscore API. This is a fallback: the writer then
+ * receives a validated tactical timeline instead of an opaque MCP text blob. */
+export function applyMcpTennisPointByPoint(match: Match, evidence: McpEvidence[]): Match {
+  if (match.sport !== "tennis") return match;
+  const pointByPoint = evidence.find((item) => item.toolName === "Get_Match_Point_by_Point");
+  if (!pointByPoint) return match;
+  const payload = parseMcpJson(pointByPoint.content);
+  if (!payload) return match;
+  const mapped = mapPointByPoint(payload);
+  if (!mapped || mapped.sets.length === 0) return match;
+  return { ...match, pointByPoint: mapped };
+}
+
+/** The raw PBP JSON is needed only to build `pointByPoint`. Once normalized,
+ * replace it with a short provenance note so it cannot crowd out the writer's
+ * instructions or duplicate the canonical tactical timeline in the prompt. */
+export function compactMcpEvidenceForReport(match: Match, evidence: McpEvidence[]): McpEvidence[] {
+  if (match.sport !== "tennis" || !match.pointByPoint?.sets.length) return evidence;
+  return evidence.map((item) => item.toolName === "Get_Match_Point_by_Point"
+    ? {
+        ...item,
+        content: JSON.stringify({
+          normalizedInto: "tacticalTimeline",
+          sets: match.pointByPoint!.sets.length,
+        }),
+      }
+    : item
+  );
 }
 
 interface EnrichmentResponse {

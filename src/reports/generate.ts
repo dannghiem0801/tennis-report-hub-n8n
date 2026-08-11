@@ -13,7 +13,13 @@ import { uid } from "@/lib/utils";
 import { callLLM, isLLMConfigured, LLMError } from "@/api/llm";
 import { buildMatchQueries, fetchMatchSources, type FirecrawlSource } from "@/api/firecrawl";
 import { buildMatchEvidence, type MatchEvidence, type McpEvidence } from "./evidence";
-import { applyMcpTennisMatchDetails, fetchMcpEvidence, selectMcpRequests } from "./mcp-enrichment";
+import {
+  applyMcpTennisMatchDetails,
+  applyMcpTennisPointByPoint,
+  compactMcpEvidenceForReport,
+  fetchMcpEvidence,
+  selectMcpRequests,
+} from "./mcp-enrichment";
 import {
   buildRepairPrompt,
   parseEnvelope,
@@ -685,7 +691,11 @@ export async function applyTemplate(
     );
   }
 
-  const enrichedMatch = applyMcpTennisMatchDetails(match, mcpEvidence);
+  const enrichedMatch = applyMcpTennisPointByPoint(
+    applyMcpTennisMatchDetails(match, mcpEvidence),
+    mcpEvidence,
+  );
+  const normalizedMcpEvidence = compactMcpEvidenceForReport(enrichedMatch, mcpEvidence);
 
   // 3. Pre-fetch external sources (only when a Firecrawl key is set).
   let sources: FirecrawlSource[] = [];
@@ -714,15 +724,15 @@ export async function applyTemplate(
   }
   // Re-build evidence so the JSON envelope includes both verified web excerpts
   // and any bounded, server-fetched Rapid MCP data.
-  const evidence: MatchEvidence = sources.length || mcpEvidence.length
-    ? buildMatchEvidence(enrichedMatch, sources, mcpEvidence)
+  const evidence: MatchEvidence = sources.length || normalizedMcpEvidence.length
+    ? buildMatchEvidence(enrichedMatch, sources, normalizedMcpEvidence)
     : baseEvidence;
 
   // 3. Build the prompt. The template persona + rules + the JSON
   // envelope go in one document. Tools are disabled by default; the
   // LLM must answer from the envelope alone.
   const persona = template.content.trim();
-  const fullPrompt = `${persona}\n${buildPromptContextWithSources(enrichedMatch, sources, mcpEvidence)}\n`;
+  const fullPrompt = `${persona}\n${buildPromptContextWithSources(enrichedMatch, sources, normalizedMcpEvidence)}\n`;
 
   if (!isLLMConfigured(llmConfig)) {
     // No LLM configured — preserve the existing prompt fallback.
