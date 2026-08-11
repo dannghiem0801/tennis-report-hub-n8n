@@ -783,24 +783,31 @@ test("legacy report (no quality) keeps copyable behavior", () => {
 
 console.log("\n=== Dispatcher ===\n");
 
-test("MCP enrichment: requests only the missing tennis data within the cap", () => {
+test("MCP enrichment: enriches every completed tennis match within the cap", () => {
   const match = baseTennisMatch();
-  delete match.stats;
   const requests = selectMcpRequests(match);
   assertEq(requests.length, 2, "two bounded tool calls");
-  assertEq(requests[0]?.name, "Get_Match_Stats", "stats is first missing field");
-  assertEq(requests[1]?.name, "Get_Match_Point_by_Point", "PBP is second missing field");
+  assertEq(requests[0]?.name, "Get_Match_Stats", "stats are first for tennis");
+  assertEq(requests[1]?.name, "Get_Match_Point_by_Point", "PBP is second for tennis");
   assertEq(requests[0]?.arguments.match_id, match.id, "match id passed to MCP");
 });
 
-test("MCP enrichment: skips complete evidence and non-completed matches", () => {
+test("MCP enrichment: enriches every completed football match within the cap", () => {
+  const match = baseFootballMatch();
+  const requests = selectMcpRequests(match);
+  assertEq(requests.length, 2, "two bounded tool calls");
+  assertEq(requests[0]?.name, "Get_Match_Details", "details are first for football");
+  assertEq(requests[1]?.name, "Get_Match_Stats", "stats are second for football");
+  assertEq(requests[0]?.arguments.match_id, match.id, "match id passed to MCP");
+});
+
+test("MCP enrichment: never runs for a match that has not completed", () => {
   const complete = baseTennisMatch();
   complete.pointByPoint = { sets: [] };
-  assertEq(selectMcpRequests(complete).length, 1, "empty PBP needs enrichment");
+  assertEq(selectMcpRequests(complete).length, 2, "completed tennis always gets enrichment");
   complete.pointByPoint = { sets: [{ setNumber: 1, name: "Set 1", games: [] }] };
-  assertEq(selectMcpRequests(complete).length, 0, "complete evidence needs no MCP");
+  assertEq(selectMcpRequests(complete).length, 2, "complete evidence still gets MCP provenance");
   complete.status = "live";
-  delete complete.stats;
   assertEq(selectMcpRequests(complete).length, 0, "live match never calls MCP");
 });
 

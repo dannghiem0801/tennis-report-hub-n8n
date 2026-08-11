@@ -143,6 +143,8 @@ Trả về set-by-set scores (e.g. `6-4, 3-6, 6-3`) + stats (aces, double faults
 
 The app includes a server-only MCP bridge at `POST /api/mcp/enrich`. It is disabled by default and is intentionally limited to the read-only tool names listed in `RAPID_MCP_ALLOWED_TOOLS`. A request may contain at most `RAPID_MCP_MAX_CALLS` calls (default: 2); every returned item has a stable `mcp-*` evidence ID and timestamp. After the server variables are configured, `GET /api/mcp/tools` shows the available tool names so the allowlist can be selected without guessing.
 
+For every completed prompt-based report, the app fetches two MCP evidence items before it asks the LLM to write: **tennis** uses `Get_Match_Stats` + `Get_Match_Point_by_Point`; **football** uses `Get_Match_Details` + `Get_Match_Stats`. Keep all four names in `RAPID_MCP_ALLOWED_TOOLS`; failed MCP calls remain a soft fallback so the existing verified API evidence can still produce a report.
+
 To enable it, open the Flashscore4 Playground in RapidAPI, select the subscribed Application, click **MCP**, then copy the exact URL and host-routing values into Vercel server environment variables. For the supplied Flashscore config, set `RAPID_MCP_REQUEST_HEADERS={"x-api-host":"flashscore4.p.rapidapi.com"}`; the server sends `RAPID_MCP_API_KEY` as `x-api-key`. Do not expose the generated configuration or key in `VITE_*` variables or the Settings UI. Run `npm run test:rapid-mcp` to verify the offline client contract before deployment; an authenticated live smoke test is only possible after the Playground configuration is installed.
 
 ## 🏗️ Tech stack

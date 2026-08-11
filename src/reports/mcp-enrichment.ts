@@ -35,9 +35,9 @@ function hasUsableContent(content: string): boolean {
 }
 
 /**
- * Select the smallest useful data recovery set. Tool names are the FlashScore
- * MCP names configured in RAPID_MCP_ALLOWED_TOOLS; callers never choose
- * arbitrary MCP tools. A report starts only after a completed match, but the
+ * Select a bounded, sport-specific evidence set for every completed report.
+ * Tool names are the FlashScore MCP names configured in
+ * RAPID_MCP_ALLOWED_TOOLS; callers never choose arbitrary MCP tools. The
  * status guard prevents accidental enrichment for live/scheduled previews.
  */
 export function selectMcpRequests(match: Match): McpToolRequest[] {
@@ -50,18 +50,19 @@ export function selectMcpRequests(match: Match): McpToolRequest[] {
     }
   };
 
-  // Missing final-score detail is most important for a publishable recap.
-  if (match.sport === "tennis" && (!match.sets || match.sets.length === 0)) {
+  if (match.sport === "football") {
+    // Football currently receives its score from list-by-date. Details and
+    // statistics add the event-level and tactical context needed for a recap.
     add("Get_Match_Details");
-  }
-  if (match.sport === "football" && !match.finalScore) {
-    add("Get_Match_Details");
+    add("Get_Match_Stats");
+    return requests;
   }
 
-  if (!match.stats) add("Get_Match_Stats");
-  if (match.sport === "tennis" && !match.pointByPoint?.sets.length) {
-    add("Get_Match_Point_by_Point");
-  }
+  // Tennis already receives set details from the REST adapter. MCP adds
+  // independently fetched statistics and game-by-game context on every
+  // completed report, even when the local cache happens to be populated.
+  add("Get_Match_Stats");
+  add("Get_Match_Point_by_Point");
   return requests;
 }
 
