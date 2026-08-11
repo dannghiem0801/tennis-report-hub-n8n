@@ -18,22 +18,17 @@ import {
 interface RequestedTool {
   name: string;
   arguments: Record<string, unknown>;
+  optional: boolean;
 }
-
-const TOOL_FALLBACKS: Record<string, string[]> = {
-  // The RapidAPI catalog can expose a dedicated football match summary. Older
-  // Flashscore applications may not have it, so retain the already-configured
-  // details tool as a deterministic read-only fallback.
-  Get_Match_Summary: ["Get_Match_Summary", "Get_Match_Details"],
-};
 
 export function resolveRequestedToolName(
   requestedName: string,
   allowedTools: string[],
   availableTools: Set<string>
 ): string | null {
-  const candidates = TOOL_FALLBACKS[requestedName] ?? [requestedName];
-  return candidates.find((name) => allowedTools.includes(name) && availableTools.has(name)) ?? null;
+  return allowedTools.includes(requestedName) && availableTools.has(requestedName)
+    ? requestedName
+    : null;
 }
 
 function setCors(res: VercelResponse): void {
@@ -56,7 +51,11 @@ function parseRequestedTools(body: unknown, maxCalls: number): RequestedTool[] {
     if (!request || typeof request !== "object" || Array.isArray(request)) {
       throw new RapidMcpError(`requests[${index}] không hợp lệ.`, 400);
     }
-    const { name, arguments: args } = request as { name?: unknown; arguments?: unknown };
+    const { name, arguments: args, optional } = request as {
+      name?: unknown;
+      arguments?: unknown;
+      optional?: unknown;
+    };
     if (typeof name !== "string" || !name.trim() || name.length > 128) {
       throw new RapidMcpError(`requests[${index}].name không hợp lệ.`, 400);
     }
@@ -66,7 +65,14 @@ function parseRequestedTools(body: unknown, maxCalls: number): RequestedTool[] {
     if (JSON.stringify(args).length > 8_000) {
       throw new RapidMcpError(`requests[${index}].arguments quá lớn.`, 400);
     }
-    return { name: name.trim(), arguments: args as Record<string, unknown> };
+    if (optional !== undefined && typeof optional !== "boolean") {
+      throw new RapidMcpError(`requests[${index}].optional phải là boolean.`, 400);
+    }
+    return {
+      name: name.trim(),
+      arguments: args as Record<string, unknown>,
+      optional: optional === true,
+    };
   });
 }
 
@@ -100,6 +106,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse): 
       const request = requests[index];
       const toolName = resolveRequestedToolName(request.name, config.allowedTools, availableTools);
       if (!toolName) {
+        if (request.optional) continue;
         throw new RapidMcpError(`Tool MCP không được cấu hình hoặc không được phép: ${request.name}`, 403);
       }
       const result = await client.callTool(toolName, request.arguments);

@@ -12,11 +12,13 @@ import type { McpEvidence } from "./evidence";
 
 const ENRICHMENT_URL = "/api/mcp/enrich";
 const REQUEST_TIMEOUT_MS = 25_000;
-const MAX_AUTOMATIC_CALLS = 2;
+const MAX_AUTOMATIC_CALLS = 3;
 
 export interface McpToolRequest {
   name: string;
   arguments: { match_id: string };
+  /** Optional sources must never block the required evidence set. */
+  optional?: boolean;
 }
 
 interface EnrichmentResponse {
@@ -44,17 +46,19 @@ export function selectMcpRequests(match: Match): McpToolRequest[] {
   if (match.status !== "completed" || !match.id) return [];
 
   const requests: McpToolRequest[] = [];
-  const add = (name: string) => {
+  const add = (name: string, optional = false) => {
     if (requests.length < MAX_AUTOMATIC_CALLS) {
-      requests.push({ name, arguments: { match_id: match.id } });
+      requests.push({ name, arguments: { match_id: match.id }, ...(optional ? { optional: true } : {}) });
     }
   };
 
   if (match.sport === "football") {
-    // The server resolves this semantic request to RapidAPI's dedicated
-    // summary tool where available, or safely falls back to match details.
+    // Details and summary are required for the final match narrative.
+    // Commentary is a third, optional event feed: older RapidAPI plans may
+    // not expose it, but that must not block the two required sources.
+    add("Get_Match_Details");
     add("Get_Match_Summary");
-    add("Get_Match_Stats");
+    add("Get_Match_Commentary", true);
     return requests;
   }
 

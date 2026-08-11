@@ -18,8 +18,8 @@ assert(
     "Get_Match_Summary",
     ["Get_Match_Details"],
     new Set(["Get_Match_Details"])
-  ) === "Get_Match_Details",
-  "falls back to configured match details when no summary tool is available"
+  ) === null,
+  "does not duplicate details when a required summary tool is unavailable"
 );
 
 assert(
