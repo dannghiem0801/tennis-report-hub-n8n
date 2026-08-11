@@ -30,6 +30,13 @@ import type { VercelRequest, VercelResponse } from "@vercel/node";
 const DEFAULT_HOST = "flashscore4.p.rapidapi.com";
 const DEFAULT_TIMEOUT_MS = 30_000;
 
+/** Prefer the dedicated REST key, but ignore empty dashboard placeholders. */
+export function getRapidApiKey(
+  env: Record<string, string | undefined>
+): string | undefined {
+  return env.RAPID_API_KEY?.trim() || env.RAPID_MCP_API_KEY?.trim() || undefined;
+}
+
 function setCors(res: VercelResponse): void {
   res.setHeader("Access-Control-Allow-Origin", "*");
   res.setHeader("Access-Control-Allow-Methods", "GET, POST, OPTIONS");
@@ -51,8 +58,11 @@ export default async function handler(
     return;
   }
 
-  const apiKey = process.env.RAPID_API_KEY ?? process.env.RAPID_MCP_API_KEY;
+  const apiKey = getRapidApiKey(process.env);
   if (!apiKey) {
+    // Do not log a key value. This makes a Preview-scope problem visible in
+    // Vercel logs instead of surfacing only as a generic browser-side 500.
+    console.error("[api/flashscore] missing RAPID_API_KEY and RAPID_MCP_API_KEY");
     res.status(500).json({ error: "Server misconfigured: RAPID_API_KEY or RAPID_MCP_API_KEY not set" });
     return;
   }
