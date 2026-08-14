@@ -115,6 +115,11 @@ export interface TennisNarrativePlan {
   sets: Array<{
     setNumber: number;
     winner: 1 | 2;
+    /** Resolved names and winner-first score let the writer use the plan
+     * directly instead of translating player sides from raw PBP. */
+    winnerName: string;
+    loserName: string;
+    winnerScore: { winner: number; loser: number };
     finalScore: { player1: number; player2: number };
     /** The last verified break in the set is a safe concrete turning point.
      * A set without a break but ending 7-6 must be described as a tiebreak. */
@@ -123,13 +128,23 @@ export interface TennisNarrativePlan {
           type: "break";
           gameNumber: number;
           byPlayer: 1 | 2;
+          actorName: string;
+          opponentName: string;
+          scoreBefore: { player1: number; player2: number };
           scoreAfter: { player1: number; player2: number };
         }
-      | { type: "tiebreak" }
+      | {
+          type: "tiebreak";
+          actorName: string;
+          opponentName: string;
+        }
       | {
           type: "set_finish";
           gameNumber: number;
           byPlayer: 1 | 2;
+          actorName: string;
+          opponentName: string;
+          scoreBefore: { player1: number; player2: number };
           scoreAfter: { player1: number; player2: number };
         };
   }>;
@@ -371,33 +386,48 @@ function validateTennisPbp(pbp: PointByPointData): { ok: true; timeline: TennisT
   return { ok: true, timeline: { sets } };
 }
 
-function buildTennisNarrativePlan(timeline: TennisTacticalTimeline | null): TennisNarrativePlan | null {
+function buildTennisNarrativePlan(
+  timeline: TennisTacticalTimeline | null,
+  player1Name: string,
+  player2Name: string,
+): TennisNarrativePlan | null {
   if (!timeline || timeline.sets.length === 0) return null;
 
   return {
     sets: timeline.sets.map((set) => {
       const winner: 1 | 2 = set.finalScore.player1 > set.finalScore.player2 ? 1 : 2;
+      const winnerName = winner === 1 ? player1Name : player2Name;
+      const loserName = winner === 1 ? player2Name : player1Name;
       const lastBreak = [...set.games].reverse().find((game) => game.isBreak);
       let requiredBeat: TennisNarrativePlan["sets"][number]["requiredBeat"];
 
       if (lastBreak) {
+        const gameIndex = set.games.findIndex((game) => game.gameNumber === lastBreak.gameNumber);
+        const previousGame = gameIndex > 0 ? set.games[gameIndex - 1] : null;
         requiredBeat = {
           type: "break",
           gameNumber: lastBreak.gameNumber,
           byPlayer: lastBreak.winner,
+          actorName: lastBreak.winner === 1 ? player1Name : player2Name,
+          opponentName: lastBreak.winner === 1 ? player2Name : player1Name,
+          scoreBefore: previousGame?.finalScore ?? { player1: 0, player2: 0 },
           scoreAfter: lastBreak.finalScore,
         };
       } else if (
         (set.finalScore.player1 === 7 && set.finalScore.player2 === 6) ||
         (set.finalScore.player1 === 6 && set.finalScore.player2 === 7)
       ) {
-        requiredBeat = { type: "tiebreak" };
+        requiredBeat = { type: "tiebreak", actorName: winnerName, opponentName: loserName };
       } else {
         const finalGame = set.games[set.games.length - 1]!;
+        const previousGame = set.games.length > 1 ? set.games[set.games.length - 2] : null;
         requiredBeat = {
           type: "set_finish",
           gameNumber: finalGame.gameNumber,
           byPlayer: finalGame.winner,
+          actorName: finalGame.winner === 1 ? player1Name : player2Name,
+          opponentName: finalGame.winner === 1 ? player2Name : player1Name,
+          scoreBefore: previousGame?.finalScore ?? { player1: 0, player2: 0 },
           scoreAfter: finalGame.finalScore,
         };
       }
@@ -405,6 +435,11 @@ function buildTennisNarrativePlan(timeline: TennisTacticalTimeline | null): Tenn
       return {
         setNumber: set.setNumber,
         winner,
+        winnerName,
+        loserName,
+        winnerScore: winner === 1
+          ? { winner: set.finalScore.player1, loser: set.finalScore.player2 }
+          : { winner: set.finalScore.player2, loser: set.finalScore.player1 },
         finalScore: set.finalScore,
         requiredBeat,
       };
@@ -534,7 +569,11 @@ export function buildTennisEvidence(
       }
     }
   }
-  const narrativePlan = buildTennisNarrativePlan(tacticalTimeline);
+  const narrativePlan = buildTennisNarrativePlan(
+    tacticalTimeline,
+    facts.player1.fullName,
+    facts.player2.fullName,
+  );
 
   // ---- sources ----
   const externalSources: ExternalSourceEvidence[] = sources.map((s) => ({

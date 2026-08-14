@@ -270,6 +270,13 @@ test("tennis: validated PBP creates one mandatory narrative beat per set", () =>
     10,
     "last break of set one is game 10"
   );
+  const firstBeat = evidence.narrativePlan?.sets[0]?.requiredBeat;
+  assertEq(firstBeat?.type, "break", "set one has a named break beat");
+  if (firstBeat?.type !== "break") throw new Error("expected a break beat");
+  assertEq(firstBeat.actorName, "Jakub Mensik", "writer brief resolves the player side to a full name");
+  assertEq(firstBeat.opponentName, "Botic van de Zandschulp", "writer brief resolves the opponent name");
+  assertEq(firstBeat.scoreBefore.player1, 5, "writer brief keeps the score before the deciding break");
+  assertEq(firstBeat.scoreBefore.player2, 4, "writer brief keeps the opposing score before the deciding break");
 });
 
 test("tennis: generic scorecard is rejected when verified PBP exists", () => {
@@ -961,6 +968,8 @@ test("Tennis prompt requires full names and explicit seeds when available", () =
   assert(tennisPrompt.includes("hạt giống số X"), "prompt requires an explicit seed when supplied");
   assert(tennisPrompt.includes("winnerScore"), "prompt requires winner-first set scores");
   assert(tennisPrompt.includes("narrativePlan"), "prompt requires verified turning points from the timeline");
+  assert(tennisPrompt.includes("actorName"), "prompt directs the writer to use resolved player names in the narrative plan");
+  assert(tennisPrompt.includes("4 đoạn ngắn"), "prompt requires the intended newsroom paragraph rhythm");
   assert(tennisPrompt.includes("KHÔNG tự suy ra đối thủ kế tiếp"), "prompt blocks invented next opponents");
 });
 
