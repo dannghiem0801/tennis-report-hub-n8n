@@ -248,7 +248,7 @@ console.log("\n=== Validator: tennis evidence + valid article ===\n");
 test("tennis: valid API-only article is accepted", () => {
   const m = baseTennisMatch();
   const ev = buildTennisEvidence(m, []);
-  const article = "Jakub Mensik hạ Botic van de Zandschulp 6-4, 7-5 tại vòng R32 của giải ATP Montreal. Mensik thực hiện 12 cú ace, gấp 3.0 lần so với 4 của đối thủ. Tỉ lệ giao bóng ăn điểm đầu tiên đạt 65%. Trận đấu kéo dài 95 phút.";
+  const article = "Tại vòng R32 ATP Montreal, hạt giống số 14 Jakub Mensik, hạng 18 ATP, gặp Botic van de Zandschulp, hạng 64 ATP.\n\nMensik hạ Botic van de Zandschulp 6-4, 7-5. Mensik thực hiện 12 cú ace, gấp 3.0 lần so với 4 của đối thủ. Tỉ lệ giao bóng ăn điểm đầu tiên đạt 65%. Trận đấu kéo dài 95 phút.";
   const env = parseEnvelope(JSON.stringify({
     articleMarkdown: article,
     sourceMode: "api-only",
@@ -296,12 +296,32 @@ test("tennis: generic scorecard is rejected when verified PBP exists", () => {
 test("tennis: set-by-set recap using required PBP beats is accepted", () => {
   const evidence = buildTennisEvidence(tennisMatchWithValidatedTimeline(), []);
   const envelope = parseEnvelope(JSON.stringify({
-    articleMarkdown: "Jakub Mensik gặp Botic van de Zandschulp tại vòng R32 ATP Montreal. Ở set một, Mensik bẻ game ở game thứ 10 để khép lại set 6-4. Sang set hai, anh bẻ giao bóng ở game 11, tạo cách biệt trước khi bảo toàn game cuối để thắng 7-5. Mensik thắng chung cuộc 6-4, 7-5 sau 95 phút.",
+    articleMarkdown: "Tại vòng R32 ATP Montreal, hạt giống số 14 Jakub Mensik, hạng 18 ATP, gặp Botic van de Zandschulp, hạng 64 ATP.\n\nỞ set một, Mensik bẻ game ở game thứ 10 để khép lại set 6-4. Sang set hai, anh bẻ giao bóng ở game 11, tạo cách biệt trước khi bảo toàn game cuối để thắng 7-5. Mensik thắng chung cuộc 6-4, 7-5 sau 95 phút.",
     sourceMode: "api-only",
     evidenceIdsUsed: ["facts", "tacticalTimeline"],
   }));
   const result = validateEnvelope(envelope!, evidence);
   assert(result.ok, `expected tactical recap to pass, got ${result.issues.map((issue) => issue.code).join(",")}`);
+});
+
+test("tennis: opening carries tournament country, round, players, seed and rankings without a spoiler", () => {
+  const match = baseTennisMatch();
+  match.tournamentName = "ATP - SINGLES: Montreal (Canada), hard";
+  const evidence = buildTennisEvidence(match, []);
+  assertEq(evidence.facts.tournamentDisplayName, "Montreal", "editorial tournament name");
+  assertEq(evidence.facts.tournamentCountry, "Canada", "host country is extracted");
+  const article = "Tại giải Montreal ở Canada, vòng R32 chứng kiến hạt giống số 14 Jakub Mensik, hạng 18 ATP, gặp Botic van de Zandschulp, hạng 64 ATP.\n\nMensik đánh bại Botic van de Zandschulp với tỉ số 6-4, 7-5 sau 95 phút.";
+  const envelope = parseEnvelope(JSON.stringify({ articleMarkdown: article, sourceMode: "api-only", evidenceIdsUsed: ["facts"] }));
+  const result = validateEnvelope(envelope!, evidence);
+  assert(result.ok, `expected a spoiler-free opening to pass, got ${result.issues.map((issue) => issue.code).join(",")}`);
+});
+
+test("tennis: score or outcome in the opening paragraph is rejected", () => {
+  const evidence = buildTennisEvidence(baseTennisMatch(), []);
+  const article = "Tại vòng R32 ATP Montreal, hạt giống số 14 Jakub Mensik, hạng 18 ATP, đánh bại Botic van de Zandschulp, hạng 64 ATP, với tỉ số 6-4, 7-5.\n\nMensik khép lại trận đấu sau 95 phút.";
+  const envelope = parseEnvelope(JSON.stringify({ articleMarkdown: article, sourceMode: "api-only", evidenceIdsUsed: ["facts"] }));
+  const result = validateEnvelope(envelope!, evidence);
+  assert(result.issues.some((issue) => issue.code === "spoiler_in_opening" && issue.blocking), "opening spoiler must be blocked");
 });
 
 test("tennis: rejects a winner claim paired with the losing-perspective full score", () => {

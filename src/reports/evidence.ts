@@ -53,6 +53,10 @@ export interface TennisMatchEvidence {
    *  live API; UI-side text is never trusted. */
   facts: {
     tournamentName: string;
+    /** Reader-friendly tournament title, without the feed's sport/surface labels. */
+    tournamentDisplayName: string;
+    /** Host country parsed from the tournament label when the feed supplies it. */
+    tournamentCountry: string | null;
     round: string;
     startTime: string; // ISO
     status: "scheduled" | "live" | "completed";
@@ -227,6 +231,26 @@ function pct(n: unknown): number | null {
   if (!isFiniteNumber(n)) return null;
   if (n < 0 || n > 100) return null;
   return Math.round(n * 10) / 10;
+}
+
+/** The Flashscore tournament field commonly has the form
+ * "ATP - SINGLES: Montreal (Canada), hard". Keep the raw field for
+ * traceability, but expose its editorial parts separately so writers do not
+ * have to guess the host country or repeat feed-only labels. */
+function parseTennisTournamentContext(tournamentName: string): {
+  displayName: string;
+  country: string | null;
+} {
+  const withoutSurface = tournamentName
+    .replace(/,\s*(?:hard|clay|grass|indoor(?:\s+hard)?|carpet)\s*$/i, "")
+    .trim();
+  const countryMatch = withoutSurface.match(/\(([^()]+)\)\s*$/);
+  const country = countryMatch?.[1].trim() || null;
+  const withoutCountry = countryMatch
+    ? withoutSurface.slice(0, countryMatch.index).trim()
+    : withoutSurface;
+  const displayName = withoutCountry.replace(/^[^:]+:\s*/, "").trim();
+  return { displayName: displayName || tournamentName, country };
 }
 
 /** Build canonical score forms a web source might mention. Used by
@@ -494,6 +518,7 @@ export function buildTennisEvidence(
 ): TennisMatchEvidence {
   const evidenceIds: EvidenceId[] = ["facts"];
   const limitations: string[] = [];
+  const tournament = parseTennisTournamentContext(match.tournamentName);
 
   // ---- facts ----
   const sets = match.sets && match.sets.length > 0 ? match.sets : null;
@@ -521,6 +546,8 @@ export function buildTennisEvidence(
   }
   const facts = {
     tournamentName: match.tournamentName,
+    tournamentDisplayName: tournament.displayName,
+    tournamentCountry: tournament.country,
     round: match.round,
     startTime: match.startTime,
     status: match.status,

@@ -43,6 +43,8 @@ export type IssueCode =
   | "false_source_claim"
   | "tactical_invention"
   | "tactical_omitted"
+  | "opening_context_missing"
+  | "spoiler_in_opening"
   | "truncation"
   | "word_count_short"
   | "word_count_long"
@@ -363,6 +365,60 @@ function detectProcessText(article: string): ValidationIssue[] {
   return issues;
 }
 
+/** The first paragraph establishes the match without revealing its outcome.
+ * It deliberately only requires metadata that the feed actually supplied. */
+function detectTennisOpeningContract(
+  article: string,
+  evidence: TennisMatchEvidence
+): ValidationIssue[] {
+  const opening = article.trim().split(/\n\s*\n/)[0] ?? "";
+  const missing: string[] = [];
+  const includes = (value: string | null | undefined) =>
+    Boolean(value && opening.toLocaleLowerCase().includes(value.toLocaleLowerCase()));
+
+  if (!includes(evidence.facts.tournamentDisplayName || evidence.facts.tournamentName)) {
+    missing.push("tên giải");
+  }
+  if (evidence.facts.tournamentCountry && !includes(evidence.facts.tournamentCountry)) {
+    missing.push("quốc gia đăng cai");
+  }
+  if (!includes(evidence.facts.round)) missing.push("vòng đấu");
+
+  for (const player of [evidence.facts.player1, evidence.facts.player2]) {
+    if (!includes(player.fullName)) missing.push(`họ tên ${player.fullName}`);
+    if (player.seed !== null) {
+      const seedPattern = new RegExp(`hạt\\s+giống\\s+(?:số\\s+)?${player.seed}\\b`, "i");
+      if (!seedPattern.test(opening)) missing.push(`hạt giống số ${player.seed} của ${player.fullName}`);
+    }
+    if (player.ranking !== null) {
+      const rankingPattern = new RegExp(
+        `(?:hạng\\s+${player.ranking}\\s*(?:ATP|WTA|thế\\s+giới)?|${player.ranking}\\s*(?:ATP|WTA|thế\\s+giới))`,
+        "i"
+      );
+      if (!rankingPattern.test(opening)) missing.push(`hạng ${player.ranking} của ${player.fullName}`);
+    }
+  }
+
+  const issues: ValidationIssue[] = [];
+  if (missing.length > 0) {
+    issues.push({
+      code: "opening_context_missing",
+      message: `Đoạn mở đầu thiếu: ${missing.join(", ")}`,
+      blocking: true,
+    });
+  }
+  const scoreInOpening = /\b\d{1,2}\s*-\s*\d{1,2}\b/.test(opening);
+  const outcomeInOpening = /(?:\bđánh\s+bại\b|\bthắng\s+chung\s+cuộc\b|\bgiành\s+chiến\s+thắng\b|\bđi\s+tiếp\b|\bhạ\s+(?=[A-ZÀ-Ỹ]))/i.test(opening);
+  if (scoreInOpening || outcomeInOpening) {
+    issues.push({
+      code: "spoiler_in_opening",
+      message: "Đoạn mở đầu tiết lộ tỉ số hoặc kết quả; chỉ được nêu bối cảnh trước trận",
+      blocking: true,
+    });
+  }
+  return issues;
+}
+
 /** Validate the envelope against the supplied evidence. */
 export function validateEnvelope(
   envelope: ReportEnvelopeDraft,
@@ -400,6 +456,9 @@ export function validateEnvelope(
   // Tactical invention (blocking).
   issues.push(...detectTacticalInvention(article, evidence));
   issues.push(...detectTacticalOmission(article, evidence));
+  if (evidence.sport === "tennis") {
+    issues.push(...detectTennisOpeningContract(article, evidence));
+  }
 
   // Final score must agree.
   if (evidence.sport === "tennis") {

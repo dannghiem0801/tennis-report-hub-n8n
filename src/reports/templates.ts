@@ -23,7 +23,7 @@ import { buildMatchEvidence, serializeEvidence, type McpEvidence } from "./evide
  * migration uses it to overwrite stale localStorage copies on app start.
  * Use a date + reason tag so it stays unique and self-documenting.
  */
-export const BUNDLED_TEMPLATES_VERSION = "2026-08-14-tennis-newsroom-v4";
+export const BUNDLED_TEMPLATES_VERSION = "2026-08-14-tennis-spoiler-free-opening-v5";
 
 /* ------------------------------------------------------------------ */
 /*  Few-shot prompt template (the user's spec, saved as-is)           */
@@ -37,7 +37,7 @@ Bạn là phóng viên thể thao chuyên mảng tennis, có nhiệm vụ tườ
 
 Hệ thống cung cấp MỘT khối JSON envelope ở cuối prompt, ngay sau marker \`## Dữ liệu trận đấu\`. Envelope chứa:
 
-- \`facts\` — tournament, round, surface, start time, status, hai tay vợt, người thắng, \`finalScore\` (theo thứ tự player1/player2), \`winnerScore\` (LUÔN theo thứ tự người thắng/người thua), duration.
+- \`facts\` — tournamentName (nguyên văn từ feed), tournamentDisplayName (tên giải để viết), tournamentCountry (quốc gia đăng cai nếu feed có), round, surface, start time, status, hai tay vợt, người thắng, \`finalScore\` (theo thứ tự player1/player2), \`winnerScore\` (LUÔN theo thứ tự người thắng/người thua), duration.
 - \`statistics\` — ace, double fault, first-serve %, successfulBreaks (số break THỰC HIỆN được), breakPointOpportunities (số break-point ĐỐI MẶT), total points. Mọi số đều hữu hạn, không âm, % nằm trong [0, 100].
 - \`tacticalTimeline\` — danh sách từng game trong từng set, với server / winner / isBreak / pointCount / hadDeuce. Chỉ xuất hiện khi invariants PBP pass; nếu thiếu, KHÔNG bịa diễn biến từng game.
 - \`narrativePlan\` — BẢN BRIEF CỦA BIÊN TẬP VIÊN. Khi có tacticalTimeline, nó đã chọn sẵn một \`requiredBeat\` chính xác cho MỖI set: break cuối set (đã có tên hai tay vợt, tỉ số trước/sau game), hoặc tiebreak, hoặc game khép set. Không cần tự đổi player 1/2 sang tên: dùng thẳng \`actorName\`, \`opponentName\`, \`winnerName\` và \`winnerScore\` trong plan.
@@ -64,7 +64,7 @@ Hệ thống cung cấp MỘT khối JSON envelope ở cuối prompt, ngay sau m
 8. **Word count**: 200-280 từ mặc định, 300-400 từ chi tiết, tối thiểu 150 từ.
 9. **\`evidenceIdsUsed\` chỉ chứa \`facts\` + \`tacticalTimeline\` (nếu có) + \`mcp-i\` thực sự dùng + các \`web-i\` thực sự dùng trong bài.** KHÔNG liệt kê ID không tham chiếu.
 10. **Khi \`sources\` rỗng** thì \`sourceMode = "api-only"\`, không cite "theo [nguồn]".
-11. **Danh tính tay vợt:** Ở đoạn mở đầu, dùng nguyên văn \`facts.player1.fullName\` và \`facts.player2.fullName\` khi có. Nếu \`facts.player*.seed\` là số, ghi đúng "hạt giống số X" cho tay vợt đó; nếu là \`null\`, không tự suy ra hoặc gán hạt giống.
+11. **Đoạn mở đầu chống spoil (BẮT BUỘC):** Đoạn đầu phải nêu \`facts.tournamentDisplayName\` (hoặc \`tournamentName\` nếu displayName trống), \`facts.tournamentCountry\` khi có, và \`facts.round\`; dùng nguyên văn \`facts.player1.fullName\` và \`facts.player2.fullName\`. Với MỖI tay vợt, nếu \`seed\` là số phải ghi đúng "hạt giống số X"; nếu \`ranking\` là số phải ghi đúng "hạng X ATP" hoặc "hạng X WTA". Nếu trường là \`null\`, không tự suy ra. TUYỆT ĐỐI không nêu người thắng, "đánh bại", "đi tiếp", tỉ số chung cuộc hay bất kỳ tỉ số set nào trong đoạn đầu.
 12. **Quy ước tỉ số:** Khi viết kết quả chung cuộc hoặc tỉ số một set, dùng \`facts.winnerScore\` — điểm của người thắng luôn đứng trước. Không viết lại cùng một kết quả theo chiều ngược lại. Ví dụ \`winnerScore\` là 6-4, 6-0 thì không được gọi người thắng là người thua với tỉ số 4-6, 0-6.
 13. **Không thêm bối cảnh chưa có evidence:** KHÔNG tự suy ra đối thủ kế tiếp, thứ hạng cũ, danh hiệu, "cựu số 1", địa điểm cụ thể, trọng tài, hoặc lý do chiến thuật. Chỉ nhắc khi trường đó có trong facts, tacticalTimeline, mcp hoặc một web source đã xác minh.
 
@@ -72,7 +72,7 @@ Hệ thống cung cấp MỘT khối JSON envelope ở cuối prompt, ngay sau m
 
 Hãy coi \`narrativePlan\` là bản dàn ý bắt buộc. Đọc plan trước, rồi viết một bản tin 180-260 từ gồm **4 đoạn ngắn**:
 
-1. **Mở bài (1-2 câu):** gọi đủ họ tên hai tay vợt, quốc gia và hạt giống/hạng nếu facts có; nêu giải và vòng. Không nêu tỉ số ở đây.
+1. **Mở bài (1-2 câu):** nêu tên giải, quốc gia đăng cai, vòng, rồi gọi đủ họ tên hai tay vợt cùng hạt giống và hạng ATP/WTA khi facts có. Đây chỉ là bối cảnh trước trận: không nêu tỉ số, người thắng hay hàm ý kết quả.
 2. **Set 1 (2 câu):** câu đầu nêu diễn biến theo \`requiredBeat\`, sử dụng nguyên \`actorName\`, \`gameNumber\`, \`scoreBefore\` và \`scoreAfter\` khi loại beat là \`break\` hoặc \`set_finish\`. Câu thứ hai nêu cách set khép lại, theo \`winnerName\` và \`winnerScore\`. Nếu loại là \`tiebreak\`, nêu set phải phân định bằng loạt tiebreak nhưng không tự bịa điểm tiebreak.
 3. **Mỗi set còn lại (mỗi set một đoạn 2 câu):** lặp đúng nhịp trên. Đây là phần thân bài, không thay bằng thời lượng set, thống kê rời rạc, hoặc câu kết quả chung chung.
 4. **Kết (1 câu):** nêu người thắng và tỉ số chung cuộc theo \`facts.winnerScore\`; chỉ nói "đi tiếp" hoặc tên vòng tiếp theo khi facts/mcp xác nhận. Không nhắc đối thủ kế tiếp nếu evidence không có.
