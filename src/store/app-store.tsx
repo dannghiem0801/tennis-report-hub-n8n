@@ -15,6 +15,8 @@ import { storage } from "./persistence";
 import { DEFAULT_TEMPLATES, migrateBundledTemplates } from "@/reports/templates";
 import { migrateLLMConfig } from "@/api/llm";
 import { generateReport, getMatchWinner, getFinalScore } from "@/reports/generate";
+import { buildSubmitPayload, shouldAutoSubmit } from "@/lib/submit-payload";
+import { submitMatch } from "@/api/backend";
 import { formatDateKey, formatTime, parseDateKey, uid, APP_TIMEZONE } from "@/lib/utils";
 import {
   clearApiCache,
@@ -516,6 +518,15 @@ export function AppProvider({ children }: { children: ReactNode }) {
         if (!match) return entry;
         if (match.status === "completed") {
           changed = true;
+          // Auto-submit lên n8n backend pipeline (nếu được bật) —
+          // fire-and-forget: lỗi backend không chặn pipeline local.
+          if (shouldAutoSubmit({ backendEnabled: settings.backendEnabled !== false, entryStatus: entry.status, matchStatus: match.status })) {
+            const payload = buildSubmitPayload(match, "tennis");
+            submitMatch(payload).catch((err) => {
+              // eslint-disable-next-line no-console
+              console.warn(`[backend] submit match ${match.id} failed:`, err);
+            });
+          }
           // Move entry to the entry point of the pipeline. The
           // runGeneration function will then walk through
           // fetching-pbp → building-context → (web-searching) →
@@ -530,7 +541,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
       });
       return changed ? updated : current;
     });
-  }, [matches, watchlist]);
+  }, [matches, watchlist, settings.backendEnabled]);
 
   // Generate reports for entries that just became "generating"
   //

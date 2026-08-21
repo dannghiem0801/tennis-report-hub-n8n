@@ -301,6 +301,9 @@ export interface Settings {
   defaultTemplateId: string;
   timezone: string; // e.g. "Asia/Ho_Chi_Minh"
   notificationsEnabled: boolean;
+  /** Auto-submit completed watchlist matches to the n8n backend pipeline
+   *  (POST /api/matches → Google Sheet → n8n → Hermes agent). Default true. */
+  backendEnabled?: boolean;
   /**
    * OpenAI-compatible LLM config. When `enabled` and `apiKey` are set, the
    * app auto-calls the LLM on watchlist match completion using the default

@@ -89,6 +89,7 @@ export const storage = {
       defaultTemplateId: "tpl-default",
       timezone: "Asia/Ho_Chi_Minh",
       notificationsEnabled: true,
+      backendEnabled: true,
     };
     const stored = read<Partial<Settings>>(KEYS.settings, {});
     // Merge: defaults < stored < env. LLM is left to `migrateLLMConfig`

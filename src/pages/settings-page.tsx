@@ -859,6 +859,35 @@ export function SettingsPage() {
             </CardContent>
           </Card>
 
+          {/* Backend pipeline (n8n) */}
+          <Card>
+            <CardHeader className="pb-2">
+              <CardTitle className="flex items-center gap-2 text-sm">
+                <Database className="h-3.5 w-3.5 text-emerald-400" />
+                Pipeline tự động (n8n backend)
+              </CardTitle>
+              <CardDescription className="text-[11px]">
+                Khi trận trong watchlist kết thúc, tự động gửi lên Google Sheet → n8n → Hermes agent viết recap tiếng Việt + tải video YouTube lên Drive.
+              </CardDescription>
+            </CardHeader>
+            <CardContent>
+              <label className="flex items-center gap-2">
+                <input
+                  type="checkbox"
+                  checked={settings.backendEnabled !== false}
+                  onChange={(e) => updateSettings({ backendEnabled: e.target.checked })}
+                  className="h-4 w-4 rounded border-slate-700 bg-slate-900 text-emerald-500 focus:ring-emerald-500"
+                />
+                <span className="text-sm text-slate-200">
+                  Auto-submit trận đã kết thúc lên pipeline n8n
+                </span>
+              </label>
+              <p className="mt-2 text-[11px] text-slate-500">
+                Báo cáo vẫn được sinh local như cũ; pipeline n8n bổ sung bản recap research đầy đủ nguồn + video highlights trên Drive.
+              </p>
+            </CardContent>
+          </Card>
+
           {/* Storage stats */}
           <Card className="lg:col-span-3">
             <CardHeader className="pb-2">
