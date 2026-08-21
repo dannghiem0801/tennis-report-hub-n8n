@@ -2,6 +2,7 @@
  * OAuth token management cho Vercel serverless functions.
  * Đọc GOOGLE_TOKEN_JSON từ env, dùng token hiện tại hoặc refresh khi hết hạn.
  */
+/// <reference types="node" />
 
 export interface GoogleCreds {
   token?: string;
