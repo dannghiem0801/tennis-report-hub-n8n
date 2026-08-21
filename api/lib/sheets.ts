@@ -3,7 +3,7 @@
  * SPREADSHEET_ID của tracker tennis/soccer pipeline.
  */
 
-import { getAccessToken } from "./token";
+import { getAccessToken } from "./token.js";
 
 export const SPREADSHEET_ID = "1Q1LWnF3DhE9xHovdgqWG09ir4fc8gNJ6lht-aj3KPm4";
 
