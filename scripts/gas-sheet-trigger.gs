@@ -16,7 +16,7 @@
  */
 
 // === CONFIG ===
-const WEBHOOK_URL = "http://100.89.83.117:8644/webhooks/sheets-recap";
+const WEBHOOK_URL = "https://gotten-baker-they-joan.trycloudflare.com/webhooks/sheets-recap";
 const HMAC_SECRET = "y4zJC0JMD2KM3UkdDfGq9JerSneXeltXh2CwQHhz5cc";
 const SPREADSHEET_ID = "1Q1LWnF3DhE9xHovdgqWG09ir4fc8gNJ6lht-aj3KPm4";
 
