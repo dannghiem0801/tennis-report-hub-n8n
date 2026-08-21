@@ -786,17 +786,42 @@ export function AppProvider({ children }: { children: ReactNode }) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [watchlist, matches, templates, settings]);
 
+  // ─── Auto-submit deduplication ─────────────────────────────────────────────
+  // Track entry IDs that have already been submitted to prevent duplicate calls
+  // when the watchlist array reference changes but content is the same.
+  // Persisted in sessionStorage so it survives page reloads within the same tab.
+  const getSubmittedIds = (): Set<string> => {
+    try {
+      return new Set(JSON.parse(sessionStorage.getItem("trh:submitted-entries") ?? "[]"));
+    } catch {
+      return new Set();
+    }
+  };
+  const saveSubmittedIds = (ids: Set<string>) => {
+    try {
+      sessionStorage.setItem("trh:submitted-entries", JSON.stringify([...ids]));
+    } catch {}
+  };
+  const submittedRef = useRef<Set<string>>(getSubmittedIds());
+
   // ─── Auto-submit completed entries to n8n pipeline (fire-and-forget) ─────
   useEffect(() => {
+    const currentSubmitted = submittedRef.current;
+    let changed = false;
     for (const entry of watchlist) {
       if (entry.status !== "completed") continue;
       if (!shouldAutoSubmit(entry, settings)) continue;
+      // Skip if already submitted in a previous run (including across page reloads)
+      if (currentSubmitted.has(entry.id)) continue;
+      currentSubmitted.add(entry.id);
+      changed = true;
       const payload = buildSubmitPayload(entry, entry.sport);
       void submitMatch(payload).catch((err: unknown) => {
         // eslint-disable-next-line no-console
         console.warn(`[auto-submit] ${entry.id} failed (non-fatal):`, err);
       });
     }
+    if (changed) saveSubmittedIds(currentSubmitted);
   }, [watchlist, settings]);
 
   // Helper: run one report-generation, update state, release the

@@ -816,6 +816,32 @@ export function SettingsPage() {
             </CardContent>
           </Card>
 
+          {/* n8n backend pipeline */}
+          <Card>
+            <CardHeader className="pb-2">
+              <CardTitle className="flex items-center gap-2 text-sm">
+                <SlidersHorizontal className="h-3.5 w-3.5 text-purple-400" />
+                Pipeline tự động (n8n backend)
+              </CardTitle>
+              <CardDescription className="text-[11px]">
+                Khi bật, trận hoàn thành sẽ tự gửi sang n8n để n8n xử lý tiếp recap + video.
+              </CardDescription>
+            </CardHeader>
+            <CardContent>
+              <label className="flex items-center gap-2">
+                <input
+                  type="checkbox"
+                  checked={settings.backendEnabled === true}
+                  onChange={(e) => updateSettings({ backendEnabled: e.target.checked || undefined })}
+                  className="h-4 w-4 rounded border-slate-700 bg-slate-900 text-purple-500 focus:ring-purple-500"
+                />
+                <span className="text-sm text-slate-200">
+                  Bật auto-submit lên n8n pipeline
+                </span>
+              </label>
+            </CardContent>
+          </Card>
+
           {/* Storage stats */}
           <Card className="lg:col-span-3">
             <CardHeader className="pb-2">
