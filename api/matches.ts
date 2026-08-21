@@ -5,8 +5,8 @@
  */
 /// <reference types="node" />
 
-import { buildMatchLabel } from "./lib/label";
-import { appendRow, readTab } from "./lib/sheets";
+import { buildMatchLabel } from "./lib/label.js";
+import { appendRow, readTab } from "./lib/sheets.js";
 
 export default async function handler(req: any, res: any) {
   res.setHeader("Access-Control-Allow-Origin", "*");
