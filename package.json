@@ -9,7 +9,8 @@
     "lint": "oxlint",
     "preview": "vite preview",
     "test:llm-proxy": "tsx --tsconfig tsconfig.scripts.json scripts/test-llm-proxy.ts",
-    "test:rapid-mcp": "tsx --tsconfig tsconfig.scripts.json scripts/test-rapidapi-mcp.ts"
+    "test:rapid-mcp": "tsx --tsconfig tsconfig.scripts.json scripts/test-rapidapi-mcp.ts",
+    "test": "vitest run"
   },
   "dependencies": {
     "@hookform/resolvers": "^5.5.7",
@@ -40,6 +41,7 @@
     "@vitejs/plugin-react": "^6.0.4",
     "oxlint": "^1.75.0",
     "typescript": "~6.0.2",
-    "vite": "^8.2.0"
+    "vite": "^8.2.0",
+    "vitest": "^4.1.11"
   }
 }

@@ -369,8 +369,10 @@ export interface ReportTemplate {
 export interface Settings {
   pollingIntervalMinutes: number;
   defaultTemplateId: string;
-  timezone: string;
+  timezone: string; // e.g. "Asia/Ho_Chi_Minh"
   notificationsEnabled: boolean;
+  /** Bật auto-submit completed matches lên n8n pipeline qua Vercel serverless. */
+  backendEnabled?: boolean;
   llm?: LLMConfig;
   /** @deprecated No longer used. */
   useSampleDataOverride?: boolean;

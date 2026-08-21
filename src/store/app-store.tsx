@@ -20,6 +20,8 @@ import {
 } from "@/reports/templates";
 import { migrateLLMConfig } from "@/api/llm";
 import { generateReport, getMatchWinner, getFinalScore } from "@/reports/generate";
+import { buildSubmitPayload, shouldAutoSubmit } from "@/lib/submit-payload";
+import { submitMatch } from "@/api/backend";
 import { formatDateKey, formatTime, parseDateKey, uid, APP_TIMEZONE } from "@/lib/utils";
 import {
   clearApiCache,
@@ -783,6 +785,19 @@ export function AppProvider({ children }: { children: ReactNode }) {
     });
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [watchlist, matches, templates, settings]);
+
+  // ─── Auto-submit completed entries to n8n pipeline (fire-and-forget) ─────
+  useEffect(() => {
+    for (const entry of watchlist) {
+      if (entry.status !== "completed") continue;
+      if (!shouldAutoSubmit(entry, settings)) continue;
+      const payload = buildSubmitPayload(entry, entry.sport);
+      void submitMatch(payload).catch((err: unknown) => {
+        // eslint-disable-next-line no-console
+        console.warn(`[auto-submit] ${entry.id} failed (non-fatal):`, err);
+      });
+    }
+  }, [watchlist, settings]);
 
   // Helper: run one report-generation, update state, release the
   // in-flight flag. Extracted to keep the effect body readable.
