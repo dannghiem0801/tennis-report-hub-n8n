@@ -19,6 +19,12 @@ describe("buildMatchLabel", () => {
     expect(buildMatchLabel("tennis", existing)).toBe(existing);
   });
 
+  it("appends tag when label contains pipe but no sport tag yet", () => {
+    expect(buildMatchLabel("tennis", "VERCEL TEST | Deploy Test v Pipeline 17/08/2026")).toBe(
+      "VERCEL TEST | Deploy Test v Pipeline 17/08/2026 | Tennis - Flashscore | Match"
+    );
+  });
+
   it("defaults unknown sport to Tennis tag", () => {
     expect(buildMatchLabel("basketball", "Team A v Team B 01/01/2026")).toBe(
       "Team A v Team B 01/01/2026 | Tennis - Flashscore | Match"

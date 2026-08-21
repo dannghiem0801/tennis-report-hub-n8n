@@ -9,7 +9,8 @@ const SPORT_TAGS: Record<string, string> = {
 };
 
 export function buildMatchLabel(sport: string, match: string): string {
-  if (match.includes("|")) return match;
+  // Đã là label đầy đủ (có sport tag) thì giữ nguyên
+  if (match.includes("Flashscore")) return match;
   const tag = SPORT_TAGS[sport] ?? SPORT_TAGS.tennis;
   return `${match} | ${tag} | Match`;
 }
